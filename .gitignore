@@ -1,3 +1,11 @@
-*.conf
-tftp/
+.idea
 
+tftp/*
+!tftp/
+
+tftp/boot/*
+!tftp/boot/
+
+!tftp/boot/pxelinux.cfg/
+
+dnsmasq*.conf

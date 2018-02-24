@@ -1,0 +1,27 @@
+DEFAULT menu.c32
+TIMEOUT 600
+PROMPT 0
+
+MENU TITLE Yay PXE boot!
+
+LABEL Memtest
+  MENU LABEL Memtest86+
+  TEXT HELP
+    Test da' RAM with Memtest86+ v5.01
+  ENDTEXT
+  kernel iso/memtest
+
+LABEL lubuntu_memdisk
+  MENU LABEL Lubuntu (memdisk)
+  TEXT HELP
+    Load Lubuntu ISO into RAM and boot, if it fits
+  ENDTEXT
+  KERNEL memdisk
+  APPEND initrd=iso/lubuntu.iso
+
+label disk0
+  localboot 0
+  MENU LABEL Boot disk (0x80)
+  TEXT HELP
+    Boot first hard disk
+  ENDTEXT

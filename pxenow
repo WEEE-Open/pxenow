@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import argparse
+import netifaces
+import os, stat
+from shutil import copy2 as cp, which
+from subprocess import call
+# import errno
+from netifaces import AF_INET
+
+parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
+# TODO: support using IP instead of interface (why did I even do this?)
+parser.add_argument('-i', '--interface', nargs=1, type=str, help="Interface to bind, e.g. enp3s0")
+args = parser.parse_args()
+
+DNSMASQCONF = "dnsmasq-pxe.conf"
+
+interfaces = netifaces.interfaces()
+
+if args.interface is None:
+	if 'lo' in interfaces:
+		interfaces.remove('lo')
+	num = len(interfaces)
+	if num == 0:
+		print("No interfaces found (other than loopback, possibly)")
+		exit(1)
+	elif num == 1:
+		args.interface = interfaces[0]
+	else:
+		print("More than one interface: specify which one to use in " + interfaces)
+		exit(1)
+else:
+	if args.interface not in interfaces:
+		print("Interface " + args.interface + " doesn't exist")
+		exit(1)
+
+addresses = netifaces.ifaddresses(args.interface)[AF_INET]
+if len(addresses) == 0:
+	print("No addresses found for interface " + args.interface)
+	exit(1)
+
+server = addresses[0]['addr']
+netmask = addresses[0]['netmask']
+
+# os.makedirs("tftp/boot/", exist_ok=True)
+pxelinuxFiles = ("pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk")
+
+for file in pxelinuxFiles:
+	src = "/usr/lib/syslinux/bios/" + file
+	dst = "tftp/boot/" + file
+	if not os.path.isfile(dst):
+		if os.path.isfile(src):
+			print("Copying " + file + "...")
+			cp(src, dst)
+		else:
+			print("Cannot find " + src)
+			exit(1)
+
+print("Generating dnsmasq configuration...")
+# useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
+# dhcp-option-force=210,/arch/ ← PathPrefix doesn't seem to be needed (See RFC 5071)
+dnsmasqConfig = """interface={iface}
+port=0
+bind-interfaces
+dhcp-range={ip},proxy
+dhcp-boot=boot/lpxelinux.0
+dhcp-option-force=209,"pxelinux.cfg/default"
+dhcp-option-force=66,{ip}
+enable-tftp
+tftp-root={pwd}/tftp
+""".format(iface=args.interface, ip=server, pwd=os.getcwd())
+
+with open(DNSMASQCONF, "w") as configFile:
+	configFile.write(dnsmasqConfig)
+os.chmod(DNSMASQCONF, os.stat(DNSMASQCONF).st_mode | stat.S_IROTH)
+
+if which("dnsmasq") is None:
+	print("dnsmasq binary not found in PATH")
+	exit(2)
+
+# Also doens't work:
+# theDamnPath = os.path.dirname(os.path.realpath(__file__)) + "/"
+result = call(["dnsmasq", "-d", "--test", "-C", "{conf}".format(conf=DNSMASQCONF)])
+if result == 0:
+	print("Dnsmasq config valid")
+else:
+	print("dnsmasq returned " + str(result))
+
