@@ -2,11 +2,14 @@
 
 import argparse
 import netifaces
-import os, stat
-from shutil import copy2 as cp, which
-from subprocess import call
+import os
+import stat
+import urllib.request
+import zipfile
 # import errno
 from netifaces import AF_INET
+from shutil import copy2 as cp, which
+from subprocess import call
 
 parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
 # TODO: support using IP instead of interface (why did I even do this?)
@@ -16,6 +19,13 @@ args = parser.parse_args()
 DNSMASQCONF = "dnsmasq-pxe.conf"
 
 interfaces = netifaces.interfaces()
+
+# Quick setting a static IP:
+# IFACE=enp3s0
+# ip link set "${IFACE}" up
+# ip addr flush dev "${IFACE}"
+# ip addr add 10.80.7.1/24 dev "${IFACE}"
+# flush is necessary only if this is done over and over again (e.g. in a script like it was before)
 
 if args.interface is None:
 	if 'lo' in interfaces:
@@ -42,7 +52,6 @@ if len(addresses) == 0:
 server = addresses[0]['addr']
 netmask = addresses[0]['netmask']
 
-# os.makedirs("tftp/boot/", exist_ok=True)
 pxelinuxFiles = ("pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk")
 
 for file in pxelinuxFiles:
@@ -78,11 +87,23 @@ if which("dnsmasq") is None:
 	print("dnsmasq binary not found in PATH")
 	exit(2)
 
-# Also doens't work:
-# theDamnPath = os.path.dirname(os.path.realpath(__file__)) + "/"
-result = call(["dnsmasq", "-d", "--test", "-C", "{conf}".format(conf=DNSMASQCONF)])
-if result == 0:
-	print("Dnsmasq config valid")
-else:
+result = call(["dnsmasq", "-d", "--test", "-C", DNSMASQCONF])
+if result != 0:
 	print("dnsmasq returned " + str(result))
 
+os.makedirs("tftp/boot/iso", exist_ok=True)
+if os.path.isfile("tftp/boot/iso/memtest"):
+	print("Memtest found")
+else:
+	print("Getting memtest...")
+	urllib.request.urlretrieve('http://www.memtest.org/download/5.01/memtest86+-5.01.zip', filename="tftp/memtest.zip")
+	with zipfile.ZipFile("tftp/memtest.zip", "r") as zip_ref:
+		print("Unzipping...")
+		zip_ref.extractall("tftp/boot/iso/")
+	os.rename("tftp/boot/iso/memtest86+-5.01.bin", "tftp/boot/iso/memtest")
+	os.remove("tftp/memtest.zip")
+
+# TODO: mount iso image (memdisk doesn't work for large images)
+# TODO: and set it accessible for "others" so dnsmasq doesn't explode
+
+# call(["dnsmasq", "-d", "-C", DNSMASQCONF])
