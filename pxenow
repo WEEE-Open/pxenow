@@ -71,13 +71,16 @@ print("Generating dnsmasq configuration...")
 dnsmasqConfig = """interface={iface}
 port=0
 bind-interfaces
-dhcp-range={ip},proxy
+log-dhcp
+dhcp-no-override
+dhcp-range={ip},proxy,{netmask}
 dhcp-boot=boot/lpxelinux.0
 dhcp-option-force=209,"pxelinux.cfg/default"
 dhcp-option-force=66,{ip}
+dhcp-leasefile=dnsmasq.leases
 enable-tftp
 tftp-root={pwd}/tftp
-""".format(iface=args.interface, ip=server, pwd=os.getcwd())
+""".format(iface=args.interface, ip=server, netmask=netmask, pwd=os.getcwd())
 
 with open(DNSMASQCONF, "w") as configFile:
 	configFile.write(dnsmasqConfig)
@@ -106,4 +109,4 @@ else:
 # TODO: mount iso image (memdisk doesn't work for large images)
 # TODO: and set it accessible for "others" so dnsmasq doesn't explode
 
-# call(["dnsmasq", "-d", "-C", DNSMASQCONF])
+call(["dnsmasq", "-d", "-C", DNSMASQCONF])

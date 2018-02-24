@@ -9,3 +9,4 @@ tftp/boot/*
 !tftp/boot/pxelinux.cfg/
 
 dnsmasq*.conf
+dnsmasq.leases
