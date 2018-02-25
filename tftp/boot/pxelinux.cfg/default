@@ -50,6 +50,11 @@ LABEL plop
 	ENDTEXT
 	LINUX iso/plpbt.bin
 
+LABEL lubuntu_test
+	MENU LABEL Lubuntu (test)
+    KERNEL iso/lubuntu/install/vmlinuz
+    APPEND initrd=iso/lubuntu/install/initrd.gz root=iso/lubuntu.iso rootfstype=iso9660 rootflags=loop
+
 #LABEL lubuntu_memdisk
 #	MENU LABEL Lubuntu (memdisk)
 #	TEXT HELP

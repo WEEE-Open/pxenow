@@ -34,6 +34,7 @@ def getfile(printable_name: str, destination_file: str, url: str, filename_in_zi
 parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
 # TODO: support using IP instead of interface (why did I even do this?)
 parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
+parser.add_argument('-l', '--lubuntu', type=str, help="Lubuntu ISO image")
 args = parser.parse_args()
 
 DNSMASQCONF = "dnsmasq-pxe.conf"
@@ -139,10 +140,24 @@ os.makedirs("tftp/boot/iso", exist_ok=True)
 getfile("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86+-5.01.zip", "memtest86+-5.01.bin")
 getfile("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
 
-# TODO: mount iso image (memdisk doesn't work for large images)
-# TODO: and set it accessible for "others" so dnsmasq doesn't explode
+if args.lubuntu is not None:
+	os.makedirs("tftp/boot/iso/lubuntu", exist_ok=True)
+	if not os.path.isfile(args.lubuntu):
+		print("{0} doesn't exist".format(args.lubuntu))
+		exit(4)
+	if os.path.exists("tftp/boot/iso/lubuntu.iso"):
+		if os.path.islink("tftp/boot/iso/lubuntu.iso"):
+			os.remove("tftp/boot/iso/lubuntu.iso")
+		else:
+			print("{0} exists and is not a link".format(args.lubuntu))
+			exit(3)
+	os.symlink(args.lubuntu, "tftp/boot/iso/lubuntu.iso")
+	# TODO: fails with no error message for no reason as the script goes on
+	call(["mount", "-o", "loop", "-t", "iso9660", "tftp/boot/iso/lubuntu.iso", "tftp/boot/iso/lubuntu"])
 
 try:
 	call(["dnsmasq", "-d", "-C", DNSMASQCONF])
 except KeyboardInterrupt:
 	print("Keyboard interrupt (ctrl+C) detected")
+
+call(["umount", "tftp/boot/iso/lubuntu"])
