@@ -36,7 +36,7 @@ MENU COLOR tabmsg       1;30;47
 
 LABEL memtest
 	MENU LABEL Memtest86+ v5.01
-	KERNEL iso/memtest
+	KERNEL img/memtest
 
 LABEL hdt
 	MENU LABEL HDT (Hardware Detection Tool)
@@ -48,7 +48,14 @@ LABEL plop
 	Launch PLoP Boot Manager, to boot from USB and enable USB 2.0 on
 	some BIOSes that only support on 1.1, if supported by the controller.
 	ENDTEXT
-	LINUX iso/plpbt.bin
+	LINUX img/plpbt.bin
+
+LABEL netbootxyz
+	MENU LABEL netboot.xyz
+	TEXT HELP
+	iPXE over the internet!
+	ENDTEXT
+	KERNEL img/netbootxyz
 
 LABEL lubuntu_test
 	MENU LABEL Lubuntu (test)

@@ -13,21 +13,28 @@ from subprocess import call
 
 
 def getfile(printable_name: str, destination_file: str, url: str, filename_in_zip: str) -> None:
-	if os.path.isfile("tftp/boot/iso/{0}".format(destination_file)):
+	if os.path.isfile("tftp/boot/img/{0}".format(destination_file)):
 		print("{0} found".format(printable_name))
 	else:
-		temp_name = "pxenow-downloaded-{0}.zip".format(printable_name)
-
-		if not os.path.isfile(temp_name):
+		if filename_in_zip == "":
+			# Not a zip file
 			print("Getting {0}...".format(printable_name))
-			urllib.request.urlretrieve(url, filename=temp_name)
+			urllib.request.urlretrieve(url, filename="tftp/boot/img/{0}".format(destination_file))
+		else:
+			# Zip file: download and extract
+			temp_name = "pxenow-downloaded-{0}.zip".format(printable_name)
 
-		with zipfile.ZipFile(temp_name, "r") as zip_ref:
-			print("Extracting {0}...".format(filename_in_zip))
-			zipinfo = zip_ref.getinfo(filename_in_zip)
-			zipinfo.filename = destination_file  # avoids extracting random folders and renaming
-			zip_ref.extract(filename_in_zip, path="tftp/boot/iso/")
-		os.remove(temp_name)
+			if not os.path.isfile(temp_name):
+				print("Getting {0}...".format(printable_name))
+				urllib.request.urlretrieve(url, filename=temp_name)
+
+			with zipfile.ZipFile(temp_name, "r") as zip_ref:
+				print("Extracting {0}...".format(filename_in_zip))
+				zipinfo = zip_ref.getinfo(filename_in_zip)
+				zipinfo.filename = destination_file  # avoids extracting random folders and renaming
+				zip_ref.extract(filename_in_zip, path="tftp/boot/img/")
+			os.remove(temp_name)
+
 	return
 
 
@@ -139,6 +146,7 @@ os.makedirs("tftp/boot/iso", exist_ok=True)
 
 getfile("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86+-5.01.zip", "memtest86+-5.01.bin")
 getfile("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
+getfile("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
 
 if args.lubuntu is not None:
 	os.makedirs("tftp/boot/iso/lubuntu", exist_ok=True)
