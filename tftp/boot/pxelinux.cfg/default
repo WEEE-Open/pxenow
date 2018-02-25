@@ -1,27 +1,42 @@
-DEFAULT menu.c32
+UI menu.c32
 TIMEOUT 600
 PROMPT 0
 
 MENU TITLE Yay PXE boot!
 
-LABEL Memtest
-  MENU LABEL Memtest86+
-  TEXT HELP
-    Test da' RAM with Memtest86+ v5.01
-  ENDTEXT
-  kernel iso/memtest
+
+LABEL memtest
+TEXT HELP
+Memtest86+ v5.01
+ENDTEXT
+	MENU LABEL Memtest86+
+	KERNEL iso/memtest
+
+
+LABEL plop
+TEXT HELP
+Launch PLoP Boot Manager, to boot from USB and enable USB 2.0 on
+some BIOSes that only support USB 1.1 even with a USB 2.0 controller.
+ENDTEXT
+	MENU LABEL PLoP Boot Manager
+	LINUX iso/plpbt.bin
+
 
 LABEL lubuntu_memdisk
-  MENU LABEL Lubuntu (memdisk)
-  TEXT HELP
-    Load Lubuntu ISO into RAM and boot, if it fits
-  ENDTEXT
-  KERNEL memdisk
-  APPEND initrd=iso/lubuntu.iso
+TEXT HELP
+Load Lubuntu ISO into RAM and boot, if it fits
+ENDTEXT
+	MENU LABEL Lubuntu (memdisk)
+	KERNEL memdisk
+	APPEND initrd=iso/lubuntu.iso
 
-label disk0
-  localboot 0
-  MENU LABEL Boot disk (0x80)
-  TEXT HELP
-    Boot first hard disk
-  ENDTEXT
+
+MENU Separator
+
+LABEL -
+	LOCALBOOT 0
+	MENU LABEL Boot first hard disk
+
+LABEL -
+	LOCALBOOT 1
+	MENU LABEL Boot second hard disk
