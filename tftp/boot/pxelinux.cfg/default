@@ -3,6 +3,37 @@ TIMEOUT 0
 
 MENU TITLE Yay PXE boot!
 
+# Dark "theme":
+#MENU COLOR border       34;40
+#MENU COLOR title        1;37;40
+#MENU COLOR sel          1;37;44
+#MENU COLOR unsel        37;40
+#MENU COLOR disabled     37;40
+#MENU COLOR screen       37;40
+#MENU COLOR help         37;40
+#MENU COLOR timeout_msg  37;40
+#MENU COLOR timeout      1;37;40
+#MENU COLOR tabmsg       37;40
+
+# Light "theme":
+MENU COLOR border       34;47
+MENU COLOR title        30;47
+MENU COLOR sel          1;37;44
+MENU COLOR unsel        30;47
+MENU COLOR disabled     30;47
+MENU COLOR screen       30;47
+MENU COLOR help         30;47
+MENU COLOR timeout_msg  30;47
+MENU COLOR timeout      1;30;47
+MENU COLOR tabmsg       1;30;47
+
+#LABEL reload
+#	MENU LABEL Reload
+#	TEXT HELP
+#	Reload menu from TFTP server
+#	ENDTEXT
+#	COM32 menu.c32
+
 LABEL memtest
 	MENU LABEL Memtest86+ v5.01
 	KERNEL iso/memtest
