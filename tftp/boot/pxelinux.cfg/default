@@ -3,14 +3,13 @@ TIMEOUT 0
 
 MENU TITLE Yay PXE boot!
 
-
 LABEL memtest
-	MENU LABEL Memtest86+
-	TEXT HELP
-	Memtest86+ v5.01
-	ENDTEXT
+	MENU LABEL Memtest86+ v5.01
 	KERNEL iso/memtest
 
+LABEL hdt
+	MENU LABEL HDT (Hardware Detection Tool)
+	COM32 hdt.c32
 
 LABEL plop
 	MENU LABEL PLoP Boot Manager
@@ -19,7 +18,6 @@ LABEL plop
 	some BIOSes that only support on 1.1, if supported by the controller.
 	ENDTEXT
 	LINUX iso/plpbt.bin
-
 
 #LABEL lubuntu_memdisk
 #	MENU LABEL Lubuntu (memdisk)
@@ -30,7 +28,7 @@ LABEL plop
 #	APPEND initrd=iso/lubuntu.iso
 
 
-MENU Separator
+MENU SEPARATOR
 
 LABEL -
 	LOCALBOOT 0
@@ -39,3 +37,13 @@ LABEL -
 LABEL -
 	LOCALBOOT 1
 	MENU LABEL Boot second hard disk
+
+MENU SEPARATOR
+
+LABEL reboot
+	MENU LABEL Reboot
+	COM32 reboot.c32
+
+LABEL poweroff
+	MENU LABEL Power Off
+	COM32 poweroff.c32

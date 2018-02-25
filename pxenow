@@ -73,7 +73,10 @@ if len(addresses) == 0:
 server = addresses[0]['addr']
 netmask = addresses[0]['netmask']
 
-pxelinuxFiles = ("pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk")
+# There's also "memdisk" but it's not really needed
+pxelinuxFiles = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32"]
+pxelinuxFiles.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
+pxelinuxFiles.extend(["reboot.c32", "poweroff.c32"])
 
 for file in pxelinuxFiles:
 	src = "/usr/lib/syslinux/bios/" + file
@@ -86,9 +89,16 @@ for file in pxelinuxFiles:
 			print("Cannot find " + src)
 			exit(1)
 
+pci_ids_path = "tftp/boot/" + "pci.ids"
+if not os.path.isfile(pci_ids_path):
+	if os.path.isfile("/usr/share/hwdata/pci.ids"):
+		print("Copying pci.ids...")
+		cp("/usr/share/hwdata/pci.ids", pci_ids_path)
+	else:
+		print("Warning: cannot find pci.ids ")
+
 print("Generating dnsmasq configuration...")
 # useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
-# dhcp-option-force=210,/arch/ ← PathPrefix doesn't seem to be needed (See RFC 5071)
 dnsmasqConfig = """port=0
 interface={iface}
 bind-interfaces
@@ -108,6 +118,7 @@ dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
 # These don't work in Proxy DHCP mode, apparently:
 # dhcp-boot=boot/lpxelinux.0
 # dhcp-option-force=209,"pxelinux.cfg/default" # PXELINUX config file (it's the default anyway)
+# dhcp-option-force=210,/boot/ # PathPrefix, doesn't seem to be needed (See RFC 5071)
 """.format(iface=args.interface, ip=server, netmask=netmask, pwd=os.getcwd())
 
 with open(DNSMASQCONF, "w") as configFile:
