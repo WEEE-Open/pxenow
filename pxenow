@@ -151,8 +151,9 @@ if args.lubuntu is not None:
 		else:
 			print("{0} exists and is not a link".format(args.lubuntu))
 			exit(3)
+	print("Linking Lubuntu ISO...")
 	os.symlink(args.lubuntu, "tftp/boot/iso/lubuntu.iso")
-	# TODO: fails with no error message for no reason as the script goes on
+	print("Mounting Lubuntu ISO...")
 	call(["mount", "-o", "loop", "-t", "iso9660", "tftp/boot/iso/lubuntu.iso", "tftp/boot/iso/lubuntu"])
 
 try:
