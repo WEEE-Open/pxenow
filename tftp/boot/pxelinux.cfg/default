@@ -57,9 +57,13 @@ LABEL netbootxyz
 	ENDTEXT
 	KERNEL img/netbootxyz
 
-LABEL lubuntu_test
-	MENU LABEL Lubuntu (test)
-	KERNEL iso/lubuntu/casper/vmlinuz
+MENU SEPARATOR
+
+INCLUDE pxelinux.cfg/generated.conf
+
+#LABEL lubuntu_test
+	#MENU LABEL Lubuntu (test)
+	#KERNEL iso/lubuntu/casper/vmlinuz
 
 	# Does absolutely nothing, since "fetch" is unsupported for unfathomable reasons
 	#APPEND initrd=iso/lubuntu/casper/initrd.lz fetch=tftp://10.13.37.2/boot/iso/lubuntu/casper/rootfs.squashfs
@@ -67,20 +71,12 @@ LABEL lubuntu_test
 	# initrd immediately searches for /dev/sr0 and finds nothing, obviously
 	#APPEND file=iso/lubuntu/preseed/lubuntu.seed boot=casper initrd=iso/lubuntu/casper/initrd.lz quiet splash ---
 
-	# Doesn't work and the "fetch" options is apparently not supported by Ubuntu and derivatives
+	# Doesn't work, because reasons
 	#APPEND initrd=iso/lubuntu/casper/initrd.lz root=iso/lubuntu/casper/rootfs.squashfs rootfstype=iso9660 rootflags=loop
 
 	# Fails with "/casper/vmlinuz: not found" but may be useful for other distros?
 	#CONFIG iso/lubuntu/isolinux/isolinux.cfg
 	#APPEND iso/lubuntu/isolinux/
-
-#LABEL lubuntu_memdisk
-#	MENU LABEL Lubuntu (memdisk)
-#	TEXT HELP
-#	Load Lubuntu ISO into RAM and boot, if it fits
-#	ENDTEXT
-#	KERNEL memdisk
-#	APPEND initrd=iso/lubuntu.iso
 
 
 MENU SEPARATOR

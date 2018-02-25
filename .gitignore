@@ -1,4 +1,6 @@
 .idea
+iso/
+nfs/
 
 tftp/*
 !tftp/
@@ -8,5 +10,6 @@ tftp/boot/*
 
 !tftp/boot/pxelinux.cfg/
 
+*generated*.conf
 dnsmasq*.conf
 dnsmasq.leases

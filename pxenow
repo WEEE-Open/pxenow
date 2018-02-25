@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import netifaces
 import os
 import stat
 import urllib.request
@@ -13,6 +12,14 @@ from subprocess import call
 
 
 def getfile(printable_name: str, destination_file: str, url: str, filename_in_zip: str) -> None:
+	"""
+
+	:param printable_name: description of what this thing is, used to generate temporary file names and to show in messages
+	:param destination_file: name of the extracted file, will be placed in tftp/boot/img/
+	:param url: where to download from
+	:param filename_in_zip: if downloaded file is a zip, this will be extracted and moved to destination_file. Empty string if this is already the file.
+	:return:
+	"""
 	if os.path.isfile("tftp/boot/img/{0}".format(destination_file)):
 		print("{0} found".format(printable_name))
 	else:
@@ -38,15 +45,75 @@ def getfile(printable_name: str, destination_file: str, url: str, filename_in_zi
 	return
 
 
+def unmount_all(directories: list) -> None:
+	"""
+	:param directories: mounted directories
+	"""
+	print("Unmounting all ISOs...")
+	for directory in directories:
+		print("Unmounting {0}...".format(directory))
+		call(["umount", directory])
+
+
+def guess_interface() -> str:
+	"""
+	Guess which network interface to use (= pick the only one other than lo and exit if more than one exists)
+
+	:return: interface, e.g. enp3s0
+	"""
+	import netifaces
+
+	interfaces = netifaces.interfaces()
+
+	if 'lo' in interfaces:
+		interfaces.remove('lo')
+
+	num = len(interfaces)
+	if num == 0:
+		print("No interfaces found (other than loopback, possibly)")
+		exit(1)
+	elif num == 1:
+		return interfaces[0]
+	else:
+		print("More than one interface: specify which one to use in " + str(interfaces))
+		exit(1)
+
+
+def relink(src: str, dst: str) -> None:
+	"""
+	Create a symlink. If something else with the same name already exists, delete and replace with symlink.
+
+	:param src: real file (absolute path required!)
+	:param dst: the link itself
+	:return: None
+	"""
+
+	if os.path.islink(dst):
+		current_src = os.readlink(dst)
+		if current_src == src:
+			return
+		else:
+			os.remove(dst)
+	elif os.path.exists(dst):
+		os.remove(dst)
+
+	print("Creating symlink {frm} -> {to}...".format(frm=dst, to=src))
+	os.symlink(src, dst)
+	# Doesn't work because filesystem is read-only (tries to modify real file permissions)
+	# os.chmod(dst, os.stat(dst).st_mode | stat.S_IROTH)
+
+
 parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
 # TODO: support using IP instead of interface (why did I even do this?)
 parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
-parser.add_argument('-l', '--lubuntu', type=str, help="Lubuntu ISO image")
+parser.add_argument('-s', '--server', type=str, help="IP address of current machine, used as TFTP, DHCP and NFS server")
+parser.add_argument('iso', nargs='+', type=str, help="Path to ISO images")
+parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries (should work for any ISO, but it has to be loaded entirely in RAM)")
+parser.set_defaults(memdisk=False)
 args = parser.parse_args()
 
 DNSMASQCONF = "dnsmasq-pxe.conf"
-
-interfaces = netifaces.interfaces()
+SYSLINUXCONF = "tftp/boot/pxelinux.cfg/generated.conf"
 
 # Quick setting a static IP:
 # IFACE=enp3s0
@@ -55,38 +122,36 @@ interfaces = netifaces.interfaces()
 # ip addr add 10.80.7.1/24 dev "${IFACE}"
 # flush is necessary only if this is done over and over again (e.g. in a script like it was before)
 
-if args.interface is None:
-	if 'lo' in interfaces:
-		interfaces.remove('lo')
-	num = len(interfaces)
-	if num == 0:
-		print("No interfaces found (other than loopback, possibly)")
+# None is also acceptable, if server is given
+interface = args.interface
+netmask = "255.255.255.0" # used just as a suggestion in NFS config, not really important
+
+if args.server is None:
+	import netifaces
+
+	# No IP given and no interface => we have to guess interface and obtain IP
+	if interface is None:
+		interface = guess_interface()
+
+	addresses = netifaces.ifaddresses(interface)[AF_INET]
+
+	if len(addresses) == 0:
+		print("No addresses found for interface " + str(args.interface))
 		exit(1)
-	elif num == 1:
-		args.interface = interfaces[0]
-	else:
-		print("More than one interface: specify which one to use in " + str(interfaces))
-		exit(1)
+
+	server = addresses[0]['addr']
+	netmask = addresses[0]['netmask']
 else:
-	if args.interface not in interfaces:
-		print(str(interfaces))
-		print("Interface " + str(args.interface) + " doesn't exist")
-		exit(1)
+	server = args.server
 
-addresses = netifaces.ifaddresses(args.interface)[AF_INET]
-if len(addresses) == 0:
-	print("No addresses found for interface " + str(args.interface))
-	exit(1)
+del args.interface
+del args.server
 
-server = addresses[0]['addr']
-netmask = addresses[0]['netmask']
+pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk"]
+pxelinux_files.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
+pxelinux_files.extend(["reboot.c32", "poweroff.c32"])
 
-# There's also "memdisk" but it's not really needed
-pxelinuxFiles = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32"]
-pxelinuxFiles.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
-pxelinuxFiles.extend(["reboot.c32", "poweroff.c32"])
-
-for file in pxelinuxFiles:
+for file in pxelinux_files:
 	src = "/usr/lib/syslinux/bios/" + file
 	dst = "tftp/boot/" + file
 	if not os.path.isfile(dst):
@@ -107,9 +172,14 @@ if not os.path.isfile(pci_ids_path):
 
 print("Generating dnsmasq configuration...")
 # useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
-dnsmasqConfig = """port=0
-interface={iface}
+dnsmasq_generated_config = ""
+
+if interface is not None:
+	dnsmasq_generated_config += """interface = {iface}
 bind-interfaces
+""".format(iface=interface)
+
+dnsmasq_generated_config += """port=0
 dhcp-leasefile=dnsmasq.leases
 
 enable-tftp
@@ -118,7 +188,7 @@ dhcp-option-force=66,{ip} # TFTP server
 
 log-dhcp # More info on what's going on
 dhcp-no-override # Don't put useless fields in DHCP offer
-dhcp-range={ip},proxy,{netmask}
+dhcp-range={ip},proxy
 
 pxe-service=X86PC, "PXE boot NOW", boot/lpxelinux # It adds the .0 by itself
 dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
@@ -127,10 +197,10 @@ dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
 # dhcp-boot=boot/lpxelinux.0
 # dhcp-option-force=209,"pxelinux.cfg/default" # PXELINUX config file (it's the default anyway)
 # dhcp-option-force=210,/boot/ # PathPrefix, doesn't seem to be needed (See RFC 5071)
-""".format(iface=args.interface, ip=server, netmask=netmask, pwd=os.getcwd())
+""".format(ip=server, pwd=os.getcwd())
 
 with open(DNSMASQCONF, "w") as configFile:
-	configFile.write(dnsmasqConfig)
+	configFile.write(dnsmasq_generated_config)
 os.chmod(DNSMASQCONF, os.stat(DNSMASQCONF).st_mode | stat.S_IROTH)
 
 if which("dnsmasq") is None:
@@ -148,25 +218,95 @@ getfile("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86
 getfile("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
 getfile("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
 
-if args.lubuntu is not None:
-	os.makedirs("tftp/boot/iso/lubuntu", exist_ok=True)
-	if not os.path.isfile(args.lubuntu):
-		print("{0} doesn't exist".format(args.lubuntu))
-		exit(4)
-	if os.path.exists("tftp/boot/iso/lubuntu.iso"):
-		if os.path.islink("tftp/boot/iso/lubuntu.iso"):
-			os.remove("tftp/boot/iso/lubuntu.iso")
-		else:
-			print("{0} exists and is not a link".format(args.lubuntu))
-			exit(3)
-	print("Linking Lubuntu ISO...")
-	os.symlink(args.lubuntu, "tftp/boot/iso/lubuntu.iso")
-	print("Mounting Lubuntu ISO...")
-	call(["mount", "-o", "loop", "-t", "iso9660", "tftp/boot/iso/lubuntu.iso", "tftp/boot/iso/lubuntu"])
+iso = []
+
+if args.iso is not None:
+	iso.extend(args.iso)
+
+try:
+	iso_files_found = os.listdir("iso")
+	for name in iso_files_found:
+		iso.append("iso/" + name)
+except FileNotFoundError:
+	pass
+
+if len(iso) > 0:
+	print("Generating syslinux conf for ISO files: {0}".format(str(iso)))
+	os.makedirs("nfs", exist_ok=True)
+	os.makedirs("tftp/boot/mounted", exist_ok=True)
+
+syslinux_generated_config = ""
+mounted = []
+
+for file in iso:
+	if not os.path.isfile(file):
+		print("{0} doesn't exist".format(file))
+		exit(5)
+
+	name = os.path.basename(file)
+	mount_directory = "{pwd}/nfs/{name}.mount".format(pwd=os.getcwd(), name=name)
+
+	if " " in mount_directory:
+		print("NFS path {0} contains spaces so it won't work, move everything in a directory without spaces and retry".format(mount_directory))
+		unmount_all(mounted)
+		exit(6)
+
+	os.makedirs(mount_directory, exist_ok=True)
+
+	# Could be done "if result == 0", but if script crashes midway you'd need to unmount manually...
+	mounted.append(mount_directory)
+
+	result = call(["mount", "-o", "loop,ro", "-t", "iso9660", file, mount_directory])
+
+	if result != 0:
+		print("mount returned " + str(result))
+		unmount_all(mounted)
+		exit(result)
+
+	vmlinuz_src = "{0}/casper/vmlinuz".format(mount_directory)
+	initrd_src = "{0}/casper/initrd.lz".format(mount_directory)
+
+	vmlinuz = "mounted/{0}-vmlinuz".format(name)
+	initrd = "mounted/{0}-initrd.lz".format(name)
+
+	relink(vmlinuz_src, "tftp/boot/" + vmlinuz)
+	relink(initrd_src, "tftp/boot/" + initrd)
+
+	if args.memdisk:
+		syslinux_generated_config += """
+	LABEL -
+	MENU LABEL {name} (memdisk)
+	TEXT HELP
+	Boot from RAM, if the ISO fits
+	ENDTEXT
+	KERNEL memdisk
+	APPEND initrd=iso/{name}
+	""".format(name=name)
+
+	syslinux_generated_config += """
+	LABEL -
+	MENU LABEL {name} (NFS)
+	TEXT HELP
+	Boot with kernel+initrd from TFTP,
+	and squashfs from NFS server {ip}
+	ENDTEXT
+	KERNEL {vmlinuz}
+	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd} ---
+	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=mount_directory)
+
+with open(SYSLINUXCONF, "w") as configFile:
+	configFile.write(syslinux_generated_config)
+os.chmod(SYSLINUXCONF, os.stat(SYSLINUXCONF).st_mode | stat.S_IROTH)
+
+print("Almost done, add this to /etc/exports, run 'exportfs -a' and start your NFS server:")
+print("---------------------------------------------------------------------------------")
+for full_export in mounted:
+	print('{export} {ip}/{netmask}(ro,all_squash,insecure,no_subtree_check)'.format(export=full_export, ip=server, netmask=netmask))
+print("---------------------------------------------------------------------------------")
 
 try:
 	call(["dnsmasq", "-d", "-C", DNSMASQCONF])
 except KeyboardInterrupt:
 	print("Keyboard interrupt (ctrl+C) detected")
 
-call(["umount", "tftp/boot/iso/lubuntu"])
+unmount_all(mounted)
