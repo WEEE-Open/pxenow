@@ -13,7 +13,7 @@ from subprocess import call
 
 parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
 # TODO: support using IP instead of interface (why did I even do this?)
-parser.add_argument('-i', '--interface', nargs=1, type=str, help="Interface to bind, e.g. enp3s0")
+parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
 args = parser.parse_args()
 
 DNSMASQCONF = "dnsmasq-pxe.conf"
@@ -37,16 +37,17 @@ if args.interface is None:
 	elif num == 1:
 		args.interface = interfaces[0]
 	else:
-		print("More than one interface: specify which one to use in " + interfaces)
+		print("More than one interface: specify which one to use in " + str(interfaces))
 		exit(1)
 else:
 	if args.interface not in interfaces:
-		print("Interface " + args.interface + " doesn't exist")
+		print(str(interfaces))
+		print("Interface " + str(args.interface) + " doesn't exist")
 		exit(1)
 
 addresses = netifaces.ifaddresses(args.interface)[AF_INET]
 if len(addresses) == 0:
-	print("No addresses found for interface " + args.interface)
+	print("No addresses found for interface " + str(args.interface))
 	exit(1)
 
 server = addresses[0]['addr']
@@ -68,18 +69,25 @@ for file in pxelinuxFiles:
 print("Generating dnsmasq configuration...")
 # useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
 # dhcp-option-force=210,/arch/ ← PathPrefix doesn't seem to be needed (See RFC 5071)
-dnsmasqConfig = """interface={iface}
-port=0
+dnsmasqConfig = """port=0
+interface={iface}
 bind-interfaces
-log-dhcp
-dhcp-no-override
-dhcp-range={ip},proxy,{netmask}
-dhcp-boot=boot/lpxelinux.0
-dhcp-option-force=209,"pxelinux.cfg/default"
-dhcp-option-force=66,{ip}
 dhcp-leasefile=dnsmasq.leases
+
 enable-tftp
 tftp-root={pwd}/tftp
+dhcp-option-force=66,{ip} # TFTP server
+
+log-dhcp # More info on what's going on
+dhcp-no-override # Don't put useless fields in DHCP offer
+dhcp-range={ip},proxy,{netmask}
+
+pxe-service=X86PC, "PXE boot NOW", boot/lpxelinux # It adds the .0 by itself
+dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
+
+# These don't work in Proxy DHCP mode, apparently:
+# dhcp-boot=boot/lpxelinux.0
+# dhcp-option-force=209,"pxelinux.cfg/default" # PXELINUX config file (it's the default anyway)
 """.format(iface=args.interface, ip=server, netmask=netmask, pwd=os.getcwd())
 
 with open(DNSMASQCONF, "w") as configFile:
@@ -93,6 +101,7 @@ if which("dnsmasq") is None:
 result = call(["dnsmasq", "-d", "--test", "-C", DNSMASQCONF])
 if result != 0:
 	print("dnsmasq returned " + str(result))
+	exit(result)
 
 os.makedirs("tftp/boot/iso", exist_ok=True)
 if os.path.isfile("tftp/boot/iso/memtest"):
