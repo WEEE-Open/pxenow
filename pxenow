@@ -13,11 +13,13 @@ from subprocess import call
 
 def getfile(printable_name: str, destination_file: str, url: str, filename_in_zip: str) -> None:
 	"""
+	Download a zip file from the internet, extract a single file and place it somewhere.
+	If filename_in_zip is the empty string, the downloaded file will be renamed/moved instead.
 
 	:param printable_name: description of what this thing is, used to generate temporary file names and to show in messages
 	:param destination_file: name of the extracted file, will be placed in tftp/boot/img/
 	:param url: where to download from
-	:param filename_in_zip: if downloaded file is a zip, this will be extracted and moved to destination_file. Empty string if this is already the file.
+	:param filename_in_zip: This will be extracted and moved to destination_file.
 	:return:
 	"""
 	if os.path.isfile("tftp/boot/img/{0}".format(destination_file)):
@@ -45,16 +47,6 @@ def getfile(printable_name: str, destination_file: str, url: str, filename_in_zi
 	return
 
 
-def unmount_all(directories: list) -> None:
-	"""
-	:param directories: mounted directories
-	"""
-	print("Unmounting all ISOs...")
-	for directory in directories:
-		print("Unmounting {0}...".format(directory))
-		call(["umount", directory])
-
-
 def guess_interface() -> str:
 	"""
 	Guess which network interface to use (= pick the only one other than lo and exit if more than one exists)
@@ -79,41 +71,149 @@ def guess_interface() -> str:
 		exit(1)
 
 
-def relink(src: str, dst: str) -> None:
+def relink(source: str, destination: str) -> None:
 	"""
 	Create a symlink. If something else with the same name already exists, delete and replace with symlink.
 
-	:param src: real file (absolute path required!)
-	:param dst: the link itself
+	:param source: real file (absolute path required!)
+	:param destination: the link itself
 	:return: None
 	"""
 
-	if os.path.islink(dst):
-		current_src = os.readlink(dst)
-		if current_src == src:
+	if os.path.islink(destination):
+		current_source = os.readlink(destination)
+		if current_source == source:
 			return
 		else:
-			os.remove(dst)
-	elif os.path.exists(dst):
-		os.remove(dst)
+			os.remove(destination)
+	elif os.path.exists(destination):
+		os.remove(destination)
 
-	print("Creating symlink {frm} -> {to}...".format(frm=dst, to=src))
-	os.symlink(src, dst)
-	# Doesn't work because filesystem is read-only (tries to modify real file permissions)
-	# os.chmod(dst, os.stat(dst).st_mode | stat.S_IROTH)
+	print("Creating symlink {frm} -> {to}...".format(frm=destination, to=source))
+	os.symlink(source, destination)
+
+
+def configure_nfs() -> None:
+	print("Stopping NFS server...")
+	sudocall(["systemctl", "stop", "nfs-server"])
+
+	different = False
+
+	try:
+		with open(ETCEXPORTS, "r") as exports_file:
+			old_exports = exports_file.read()
+			if old_exports != exports:
+				different = True
+	except IOError:
+		print("Cannot read {0}").format(ETCEXPORTS)
+		safe_exit(8)
+
+	if different:
+		print("Saving new {0}...".format(ETCEXPORTS))
+		try:
+			with open(ETCEXPORTS, "w") as exports_file:
+				exports_file.write(exports)
+		except IOError:
+			print("Cannot write {0}, re-run script as root or add the write permission temporarily".format(
+				ETCEXPORTS))
+			safe_exit(6)
+
+		print("Reloading exports...")
+		sudocall(["exportfs", "-a"])
+	else:
+		print("No need to update {0}".format(ETCEXPORTS))
+
+	print("Starting NFS server...")
+	sudocall(["systemctl", "start", "nfs-server"])
+	print("")
+
+
+def sudocall(what: list) -> int:
+	if args.sudo:
+		callme = ["sudo"]
+		callme.extend(what)
+		call(callme)
+	else:
+		return call(what)
+
+
+def get_syslinux_config_for(file_name: str, mount_directory: str) -> str:
+	maybe_vmlinuz = ("{0}/casper/vmlinuz".format(mount_directory), "{0}/casper/vmlinuz.efi".format(mount_directory))
+	maybe_initrd = ("{0}/casper/initrd.lz".format(mount_directory), "{0}/casper/initrd".format(mount_directory))
+
+	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, file_name)
+	initrd_src = search_for("initrd", maybe_initrd, file_name)
+
+	vmlinuz = "mounted/{0}-vmlinuz".format(name)
+	initrd = "mounted/{0}-initrd.lz".format(name)
+
+	relink(vmlinuz_src, "tftp/boot/" + vmlinuz)
+	relink(initrd_src, "tftp/boot/" + initrd)
+
+	config = """
+	LABEL -
+	MENU LABEL {name} (NFS)
+	TEXT HELP
+	Boot with kernel+initrd from TFTP,
+	and squashfs from NFS server {ip}
+	ENDTEXT
+	KERNEL {vmlinuz}
+	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd} ---
+	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=mount_directory)
+
+	# TODO: re-enable if ever needed, but requires another symlink to the ISO
+	# if args.memdisk:
+	# 	config += """
+	# LABEL -
+	# MENU LABEL {name} (memdisk)
+	# TEXT HELP
+	# Boot from RAM, if the ISO fits
+	# ENDTEXT
+	# KERNEL memdisk
+	# APPEND initrd=iso/{name}
+	# """.format(name=name)
+
+	return config
+
+
+def search_for(what: str, where: tuple, iso_file: str) -> str:
+	for maybe in where:
+		if os.path.isfile(maybe):
+			print("{file} found at {path}".format(file=what, path=maybe))
+			return maybe
+	print("{file} not found in {iso}".format(file=what, iso=iso_file))
+	safe_exit(9)
+
+
+def safe_exit(code: int):
+	if len(mounted) > 0:
+		errors = 0
+		print("Unmounting all ISOs...")
+		for directory in mounted:
+			print("Unmounting {0}...".format(directory))
+			errors += sudocall(["umount", directory])
+		if errors != 0:
+			print("Warning: some umount(s) failed, try stopping/restarting the NFS server and re-running the script")
+	exit(code)
 
 
 parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
-# TODO: support using IP instead of interface (why did I even do this?)
-parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
-parser.add_argument('-s', '--server', type=str, help="IP address of current machine, used as TFTP, DHCP and NFS server")
 parser.add_argument('iso', nargs='+', type=str, help="Path to ISO images")
-parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries (should work for any ISO, but it has to be loaded entirely in RAM)")
+parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
+parser.add_argument('-n', '--netmask', type=str, help="Netmask, used only if -s is also used")
+parser.add_argument('-s', '--server', type=str, help="IP address of current machine, used as TFTP, DHCP and NFS server")
+# parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries for each ISO")
+parser.add_argument('-N', '--nfs', action='store_true', help="Blindly overwrite /etc/exports and manage NFS server")
+parser.add_argument('-S', '--sudo', action='store_true', help="Use sudo for commands that require root permissions")
 parser.set_defaults(memdisk=False)
+parser.set_defaults(nfs=False)
+parser.set_defaults(sudo=False)
 args = parser.parse_args()
 
+mounted = []
 DNSMASQCONF = "dnsmasq-pxe.conf"
 SYSLINUXCONF = "tftp/boot/pxelinux.cfg/generated.conf"
+ETCEXPORTS = "/etc/exports"
 
 # Quick setting a static IP:
 # IFACE=enp3s0
@@ -124,7 +224,7 @@ SYSLINUXCONF = "tftp/boot/pxelinux.cfg/generated.conf"
 
 # None is also acceptable, if server is given
 interface = args.interface
-netmask = "255.255.255.0" # used just as a suggestion in NFS config, not really important
+netmask = "255.255.255.0"
 
 if args.server is None:
 	import netifaces
@@ -137,11 +237,14 @@ if args.server is None:
 
 	if len(addresses) == 0:
 		print("No addresses found for interface " + str(args.interface))
-		exit(1)
+		safe_exit(1)
 
 	server = addresses[0]['addr']
 	netmask = addresses[0]['netmask']
 else:
+	if args.netmask is None:
+		print("Provide a netmask if manually setting the IP, e.g. -n 255.255.255.0")
+		safe_exit(7)
 	server = args.server
 
 del args.interface
@@ -160,7 +263,7 @@ for file in pxelinux_files:
 			cp(src, dst)
 		else:
 			print("Cannot find " + src)
-			exit(1)
+			safe_exit(1)
 
 pci_ids_path = "tftp/boot/" + "pci.ids"
 if not os.path.isfile(pci_ids_path):
@@ -199,18 +302,18 @@ dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
 # dhcp-option-force=210,/boot/ # PathPrefix, doesn't seem to be needed (See RFC 5071)
 """.format(ip=server, pwd=os.getcwd())
 
-with open(DNSMASQCONF, "w") as configFile:
-	configFile.write(dnsmasq_generated_config)
+with open(DNSMASQCONF, "w") as config_file:
+	config_file.write(dnsmasq_generated_config)
 os.chmod(DNSMASQCONF, os.stat(DNSMASQCONF).st_mode | stat.S_IROTH)
 
 if which("dnsmasq") is None:
 	print("dnsmasq binary not found in PATH")
-	exit(2)
+	safe_exit(2)
 
 result = call(["dnsmasq", "-d", "--test", "-C", DNSMASQCONF])
 if result != 0:
 	print("dnsmasq returned " + str(result))
-	exit(result)
+	safe_exit(result)
 
 os.makedirs("tftp/boot/iso", exist_ok=True)
 
@@ -231,82 +334,66 @@ except FileNotFoundError:
 	pass
 
 if len(iso) > 0:
-	print("Generating syslinux conf for ISO files: {0}".format(str(iso)))
+	print("ISO files: {0}\n".format(str(iso)))
 	os.makedirs("nfs", exist_ok=True)
 	os.makedirs("tftp/boot/mounted", exist_ok=True)
 
 syslinux_generated_config = ""
-mounted = []
 
 for file in iso:
 	if not os.path.isfile(file):
 		print("{0} doesn't exist".format(file))
-		exit(5)
+		safe_exit(5)
 
 	name = os.path.basename(file)
 	mount_directory = "{pwd}/nfs/{name}.mount".format(pwd=os.getcwd(), name=name)
 
 	if " " in mount_directory:
-		print("NFS path {0} contains spaces so it won't work, move everything in a directory without spaces and retry".format(mount_directory))
-		unmount_all(mounted)
-		exit(6)
+		print(
+			"NFS path {0} contains spaces so it won't work, move everything in a directory without spaces and retry".format(
+				mount_directory))
+		safe_exit(6)
 
 	os.makedirs(mount_directory, exist_ok=True)
 
 	# Could be done "if result == 0", but if script crashes midway you'd need to unmount manually...
 	mounted.append(mount_directory)
 
-	result = call(["mount", "-o", "loop,ro", "-t", "iso9660", file, mount_directory])
+	result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", file, mount_directory])
 
 	if result != 0:
 		print("mount returned " + str(result))
-		unmount_all(mounted)
-		exit(result)
+		safe_exit(result)
 
-	vmlinuz_src = "{0}/casper/vmlinuz".format(mount_directory)
-	initrd_src = "{0}/casper/initrd.lz".format(mount_directory)
+	print("Generating syslinux config for {0}".format(name))
+	syslinux_generated_config += get_syslinux_config_for(name, mount_directory)
+	print()
 
-	vmlinuz = "mounted/{0}-vmlinuz".format(name)
-	initrd = "mounted/{0}-initrd.lz".format(name)
-
-	relink(vmlinuz_src, "tftp/boot/" + vmlinuz)
-	relink(initrd_src, "tftp/boot/" + initrd)
-
-	if args.memdisk:
-		syslinux_generated_config += """
-	LABEL -
-	MENU LABEL {name} (memdisk)
-	TEXT HELP
-	Boot from RAM, if the ISO fits
-	ENDTEXT
-	KERNEL memdisk
-	APPEND initrd=iso/{name}
-	""".format(name=name)
-
-	syslinux_generated_config += """
-	LABEL -
-	MENU LABEL {name} (NFS)
-	TEXT HELP
-	Boot with kernel+initrd from TFTP,
-	and squashfs from NFS server {ip}
-	ENDTEXT
-	KERNEL {vmlinuz}
-	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd} ---
-	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=mount_directory)
-
-with open(SYSLINUXCONF, "w") as configFile:
-	configFile.write(syslinux_generated_config)
+with open(SYSLINUXCONF, "w") as config_file:
+	config_file.write(syslinux_generated_config)
 os.chmod(SYSLINUXCONF, os.stat(SYSLINUXCONF).st_mode | stat.S_IROTH)
 
-print("Almost done, add this to /etc/exports, run 'exportfs -a' and start your NFS server:")
-print("---------------------------------------------------------------------------------")
+exports = ""
+
 for full_export in mounted:
-	print('{export} {ip}/{netmask}(ro,all_squash,insecure,no_subtree_check)'.format(export=full_export, ip=server, netmask=netmask))
-print("---------------------------------------------------------------------------------")
+	exports += "{export} {ip}/{nm}(ro,all_squash,insecure,no_subtree_check)\n".format(export=full_export, ip=server, nm=netmask)
+
+if exports != "":
+	if args.nfs:
+		configure_nfs()
+	else:
+		print("Almost done: add this to /etc/exports, run 'exportfs -a' and start your NFS server:")
+		print("---------------------------------------------------------------------------------")
+		print(exports)
+		print("---------------------------------------------------------------------------------")
 
 try:
 	call(["dnsmasq", "-d", "-C", DNSMASQCONF])
 except KeyboardInterrupt:
 	print("Keyboard interrupt (ctrl+C) detected")
 
-unmount_all(mounted)
+if args.nfs:
+	print("Stopping NFS server...")
+	sudocall(["systemctl", "stop", "nfs-server"])
+
+safe_exit(0)
