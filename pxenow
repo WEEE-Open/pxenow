@@ -122,7 +122,7 @@ def configure_nfs(exports_file_content: str, use_sudo: bool) -> None:
 			# Try to write new file
 			with open(ETCEXPORTS, "w") as exports_file:
 				exports_file.write(exports_file_content)
-		except IOError as why:
+		except PermissionError as why:
 			# Cannot write /etc/exports
 			if use_sudo:
 				# Create a temporary file and overwrite /etc/exports (this allows calling sudo)
@@ -183,15 +183,15 @@ def write_content_sudocall(content: str, destination: str) -> None:
 	:param destination: Where to place it
 	:return: Nothing
 	"""
-	with tempfile.NamedTemporaryFile() as temp_exports:
+	with tempfile.NamedTemporaryFile() as temp_exports, open(temp_exports.name, 'w') as temp_exports_open:
 		try:
-			temp_exports.write(content)
+			temp_exports_open.write(content)
 		except IOError:
 			print("Cannot write to temporary file {0}".format(temp_exports.name))
 			return
 		sudocall_result = sudocall(["cp", temp_exports.name, destination])
 		if sudocall_result != 0:
-			raise FatalError("Cannot write to temporary file {0}".format(temp_exports.name), sudocall_result)
+			raise FatalError("Cannot call cp {} {}".format(temp_exports.name, destination), sudocall_result)
 
 
 def get_syslinux_config_for(name: str, server: str, root_directory: str) -> str:
@@ -386,7 +386,7 @@ def find_bootable_files(paths) -> {list, list, list}:
 		for file in args.iso:
 			if os.path.isdir(file):
 				iso_directories.append(file)
-			elif file.endsWith(".iso"):
+			elif file.endswith(".iso"):
 				iso_files.append(file)
 			else:
 				img_files.append(file)
@@ -418,6 +418,7 @@ def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
 	# Could be done "if result == 0", but if script crashes midway you'd need to unmount manually...
 	mounted_files.append(mount_directory)
 
+	# TODO: detect if already mounted?
 	result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", path_to_iso, mount_directory])
 
 	if result != 0:
@@ -520,6 +521,7 @@ if __name__ == "__main__":
 	ETCEXPORTS = "/etc/exports"
 
 	mounted_list = []
+	code = 1
 	try:
 		code = main(mounted_list)
 	except FatalError as e:
@@ -530,11 +532,19 @@ if __name__ == "__main__":
 			code = e.code
 	finally:
 		if len(mounted_list) > 0:
-			errors = 0
+			errors = False
 			print("Unmounting all ISOs...")
-			for directory in mounted:
+			for directory in mounted_list:
 				print("Unmounting {0}...".format(directory))
-				errors += sudocall(["umount", directory])
+				result = sudocall(["umount", directory])
+				if result == 0:
+					try:
+						os.rmdir(directory)
+					except OSError:
+						pass
+				else:
+					errors = True
+					print("Failed to unmount {}: {}".format(directory, os.strerror(result)))
 			if errors != 0:
 				print("Warning: some umount(s) failed, try stopping/restarting the NFS server and re-running the script")
 	exit(code)
