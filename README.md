@@ -2,8 +2,6 @@
 
 Start an impromptu PXE server immediately, here, now, right in current working directory.
 
-Currently **work in progress**.
-
 ## Features
 
 * Configures dnsmasq to DHCP in proxy mode: it should work even on networks with an existing DHCP server
@@ -17,8 +15,8 @@ Currently **work in progress**.
 * Currently supports only BIOS systems, no UEFI
 * Syslinux config can be reliably generated only for *live* Ubuntu and derivatives, but should be easy to add
 more distros or the installer (see the `get_syslinux_config_for` function)
-* Many commands require root privileges, so run the script as root. There's an option to call `sudo`
-automatically, but it hasn't been tested and, to be honest, I doubt it works
+* Many commands require root privileges. There's an option (`-S`) to call `sudo` automatically, but it hasn't been
+tested extensively
 * Tested only on Arch Linux, some commands may fail on other distros
 
 ## Requirements
@@ -31,10 +29,10 @@ automatically, but it hasn't been tested and, to be honest, I doubt it works
 
 ## TODO (pull requests welcome)
 
-- Get the `--sudo` option working
 - Support Ubuntu and derivatives installer, too (generate another config for each ISO)
 - Docker container or Vagrant VM, maybe?
 - Support for more distros
+- Support for UEFI systems
 - Support IPv6?
 - More PXE options in DHCP offer, for clients too old/broken/new?
 
@@ -42,7 +40,7 @@ automatically, but it hasn't been tested and, to be honest, I doubt it works
 
 ```
 usage: pxenow [-h] [-i INTERFACE] [-n NETMASK] [-s SERVER] [-N] [-S]
-              iso [iso ...]
+              [iso [iso ...]]
 
 Create a PXE server right here, right now.
 
@@ -69,9 +67,8 @@ With `-N` the script starts/stops the `nfs-server` service automatically and com
 /etc/exports if needed. Without `-N` it outputs the correct exports and you'll have to copy them into
 /etc/exports and manually manage the NFS service.
 
-The `-S`/`--sudo` option is probably broken, but if anyone is willing to test it, it's there. Note that,
-even if it works, it won't use `sudo` to write the `/etc/exports` file, so you'll need to add write permissions
-to "others" to get that working.
+When using `-S`/`--sudo` note that it won't use `sudo` to write the `/etc/exports` file, so you'll need
+to add write permissions to "others" to get that working.
 
 ## License
 

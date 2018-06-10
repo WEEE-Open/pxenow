@@ -5,19 +5,27 @@ import os
 import stat
 import urllib.request
 import zipfile
+import tempfile
 # import errno
 from netifaces import AF_INET
 from shutil import copy2 as cp, which
-from subprocess import call
+from subprocess import call, Popen
+from typing import Union
 
 
-def getfile(printable_name: str, destination_file: str, url: str, filename_in_zip: str) -> None:
+class FatalError(Exception):
+	def __init__(self, message, return_code=None):
+		super().__init__(message)
+		self.code = return_code
+
+
+def get_img_file(printable_name: str, destination_file: str, url: str, filename_in_zip: str) -> None:
 	"""
 	Download a zip file from the internet, extract a single file and place it somewhere.
 	If filename_in_zip is the empty string, the downloaded file will be renamed/moved instead.
 
 	:param printable_name: description of what this thing is, used to generate temporary file names and to show in messages
-	:param destination_file: name of the extracted file, will be placed in tftp/boot/img/
+	:param destination_file: name of the extracted file, will be placed in tftp/boot/img/included/
 	:param url: where to download from
 	:param filename_in_zip: This will be extracted and moved to destination_file.
 	:return:
@@ -28,7 +36,7 @@ def getfile(printable_name: str, destination_file: str, url: str, filename_in_zi
 		if filename_in_zip == "":
 			# Not a zip file
 			print("Getting {0}...".format(printable_name))
-			urllib.request.urlretrieve(url, filename="tftp/boot/img/{0}".format(destination_file))
+			urllib.request.urlretrieve(url, filename="tftp/boot/img/included/{0}".format(destination_file))
 		else:
 			# Zip file: download and extract
 			temp_name = "pxenow-downloaded-{0}.zip".format(printable_name)
@@ -41,7 +49,7 @@ def getfile(printable_name: str, destination_file: str, url: str, filename_in_zi
 				print("Extracting {0}...".format(filename_in_zip))
 				zipinfo = zip_ref.getinfo(filename_in_zip)
 				zipinfo.filename = destination_file  # avoids extracting random folders and renaming
-				zip_ref.extract(filename_in_zip, path="tftp/boot/img/")
+				zip_ref.extract(filename_in_zip, path="tftp/boot/img/included/")
 			os.remove(temp_name)
 
 	return
@@ -93,7 +101,7 @@ def relink(source: str, destination: str) -> None:
 	os.symlink(source, destination)
 
 
-def configure_nfs() -> None:
+def configure_nfs(exports_file_content: str, use_sudo: bool) -> None:
 	print("Stopping NFS server...")
 	sudocall(["systemctl", "stop", "nfs-server"])
 
@@ -102,21 +110,25 @@ def configure_nfs() -> None:
 	try:
 		with open(ETCEXPORTS, "r") as exports_file:
 			old_exports = exports_file.read()
-			if old_exports != exports:
+			if old_exports != exports_file_content:
 				different = True
-	except IOError:
-		print("Cannot read {0}").format(ETCEXPORTS)
-		safe_exit(8)
+	except IOError as why:
+		raise FatalError("Cannot read {}: {}".format(ETCEXPORTS, str(why)))
 
 	if different:
 		print("Saving new {0}...".format(ETCEXPORTS))
+
 		try:
+			# Try to write new file
 			with open(ETCEXPORTS, "w") as exports_file:
-				exports_file.write(exports)
-		except IOError:
-			print("Cannot write {0}, re-run script as root or add the write permission temporarily".format(
-				ETCEXPORTS))
-			safe_exit(6)
+				exports_file.write(exports_file_content)
+		except IOError as why:
+			# Cannot write /etc/exports
+			if use_sudo:
+				# Create a temporary file and overwrite /etc/exports (this allows calling sudo)
+				write_content_sudocall(exports_file_content, ETCEXPORTS)
+			else:
+				raise FatalError("Cannot write {}: {}".format(ETCEXPORTS, str(why)))
 
 		print("Reloading exports...")
 		sudocall(["exportfs", "-a"])
@@ -128,21 +140,74 @@ def configure_nfs() -> None:
 	print("")
 
 
-def sudocall(what: list) -> int:
+def sudocall_wait(what: list) -> int:
 	if args.sudo:
 		callme = ["sudo"]
 		callme.extend(what)
-		call(callme)
 	else:
-		return call(what)
+		callme = what
+
+	with Popen(callme) as process:
+		try:
+			return process.wait()
+		except KeyboardInterrupt:
+			raise
+		except Exception:
+			process.kill()
+			process.wait()
+			raise
 
 
-def get_syslinux_config_for(file_name: str, mount_directory: str) -> str:
-	maybe_vmlinuz = ("{0}/casper/vmlinuz".format(mount_directory), "{0}/casper/vmlinuz.efi".format(mount_directory))
-	maybe_initrd = ("{0}/casper/initrd.lz".format(mount_directory), "{0}/casper/initrd".format(mount_directory))
+def sudocall(what: list) -> int:
+	"""
+	Call some command, prepending sudo if args.sudo is True
 
-	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, file_name)
-	initrd_src = search_for("initrd", maybe_initrd, file_name)
+	:param what: command and arguments
+	:return: whatever sudo/the command returns
+	"""
+	if args.sudo:
+		callme = ["sudo"]
+		callme.extend(what)
+	else:
+		callme = what
+
+	return call(callme)
+
+
+def write_content_sudocall(content: str, destination: str) -> None:
+	"""
+	Write content to a file with a command called via sudocall.
+	Useful to write files where current user has no write permission.
+
+	:param content: File content
+	:param destination: Where to place it
+	:return: Nothing
+	"""
+	with tempfile.NamedTemporaryFile() as temp_exports:
+		try:
+			temp_exports.write(content)
+		except IOError:
+			print("Cannot write to temporary file {0}".format(temp_exports.name))
+			return
+		sudocall_result = sudocall(["cp", temp_exports.name, destination])
+		if sudocall_result != 0:
+			raise FatalError("Cannot write to temporary file {0}".format(temp_exports.name), sudocall_result)
+
+
+def get_syslinux_config_for(name: str, server: str, root_directory: str) -> str:
+	"""
+	Generate a Syslinux/PXELINUX configuration entry for an ISO/directory
+
+	:param name: Entry name (human-readable)
+	:param server: Server IP
+	:param root_directory: Directory where ISO was mounted, or extracted
+	:return:
+	"""
+	maybe_vmlinuz = ("{0}/casper/vmlinuz".format(root_directory), "{0}/casper/vmlinuz.efi".format(root_directory))
+	maybe_initrd = ("{0}/casper/initrd.lz".format(root_directory), "{0}/casper/initrd".format(root_directory))
+
+	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, name)
+	initrd_src = search_for("initrd", maybe_initrd, name)
 
 	vmlinuz = "mounted/{0}-vmlinuz".format(name)
 	initrd = "mounted/{0}-initrd.lz".format(name)
@@ -159,7 +224,7 @@ def get_syslinux_config_for(file_name: str, mount_directory: str) -> str:
 	ENDTEXT
 	KERNEL {vmlinuz}
 	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd} ---
-	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=mount_directory)
+	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=root_directory)
 
 	# TODO: re-enable if ever needed, but requires another symlink to the ISO
 	# if args.memdisk:
@@ -176,224 +241,300 @@ def get_syslinux_config_for(file_name: str, mount_directory: str) -> str:
 	return config
 
 
-def search_for(what: str, where: tuple, iso_file: str) -> str:
+def search_for(what: str, where: tuple, iso_name: str) -> str:
+	"""
+	Find first file that exists from a list of paths
+
+	:param what: File name/description (generic, human-readable)
+	:param where: Possible paths
+	:param iso_name: ISO name or other printable name
+	:return:
+	"""
 	for maybe in where:
 		if os.path.isfile(maybe):
 			print("{file} found at {path}".format(file=what, path=maybe))
 			return maybe
-	print("{file} not found in {iso}".format(file=what, iso=iso_file))
-	safe_exit(9)
+	raise FatalError("{file} not found in {iso}".format(file=what, iso=iso_name))
 
 
-def safe_exit(code: int):
-	if len(mounted) > 0:
-		errors = 0
-		print("Unmounting all ISOs...")
-		for directory in mounted:
-			print("Unmounting {0}...".format(directory))
-			errors += sudocall(["umount", directory])
-		if errors != 0:
-			print("Warning: some umount(s) failed, try stopping/restarting the NFS server and re-running the script")
-	exit(code)
+def get_network_parameters(iface: Union[str, None], ip: Union[str, None], nmask: Union[str, None])\
+		-> {Union[str, None], str, str}:
+	"""
+	Obtain at least an IP and a netmask from supplied parameters.
 
+	:param iface: Interface
+	:param ip: IP
+	:param nmask: Netmask
+	:return: Interface, IP, netmask
+	"""
+	if ip is None:
+		import netifaces
 
-parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
-parser.add_argument('iso', nargs='+', type=str, help="Path to ISO images")
-parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
-parser.add_argument('-n', '--netmask', type=str, help="Netmask, used only if -s is also used")
-parser.add_argument('-s', '--server', type=str, help="IP address of current machine, used as TFTP, DHCP and NFS server")
-# parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries for each ISO")
-parser.add_argument('-N', '--nfs', action='store_true', help="Blindly overwrite /etc/exports and manage NFS server")
-parser.add_argument('-S', '--sudo', action='store_true', help="Use sudo for commands that require root permissions")
-parser.set_defaults(memdisk=False)
-parser.set_defaults(nfs=False)
-parser.set_defaults(sudo=False)
-args = parser.parse_args()
+		# No IP given and no interface, so we have to guess interface and obtain IP
+		if iface is None:
+			iface = guess_interface()
 
-mounted = []
-DNSMASQCONF = "dnsmasq-pxe.conf"
-SYSLINUXCONF = "tftp/boot/pxelinux.cfg/generated.conf"
-ETCEXPORTS = "/etc/exports"
+		addresses = netifaces.ifaddresses(iface)[AF_INET]
 
-# Quick setting a static IP:
-# IFACE=enp3s0
-# ip link set "${IFACE}" up
-# ip addr flush dev "${IFACE}"
-# ip addr add 10.80.7.1/24 dev "${IFACE}"
-# flush is necessary only if this is done over and over again (e.g. in a script like it was before)
+		if len(addresses) == 0:
+			raise FatalError("No addresses found for interface " + str(args.interface))
 
-# None is also acceptable, if server is given
-interface = args.interface
-netmask = "255.255.255.0"
-
-if args.server is None:
-	import netifaces
-
-	# No IP given and no interface => we have to guess interface and obtain IP
-	if interface is None:
-		interface = guess_interface()
-
-	addresses = netifaces.ifaddresses(interface)[AF_INET]
-
-	if len(addresses) == 0:
-		print("No addresses found for interface " + str(args.interface))
-		safe_exit(1)
-
-	server = addresses[0]['addr']
-	netmask = addresses[0]['netmask']
-else:
-	if args.netmask is None:
-		print("Provide a netmask if manually setting the IP, e.g. -n 255.255.255.0")
-		safe_exit(7)
-	server = args.server
-
-del args.interface
-del args.server
-
-pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk"]
-pxelinux_files.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
-pxelinux_files.extend(["reboot.c32", "poweroff.c32"])
-
-for file in pxelinux_files:
-	src = "/usr/lib/syslinux/bios/" + file
-	dst = "tftp/boot/" + file
-	if not os.path.isfile(dst):
-		if os.path.isfile(src):
-			print("Copying " + file + "...")
-			cp(src, dst)
-		else:
-			print("Cannot find " + src)
-			safe_exit(1)
-
-pci_ids_path = "tftp/boot/" + "pci.ids"
-if not os.path.isfile(pci_ids_path):
-	if os.path.isfile("/usr/share/hwdata/pci.ids"):
-		print("Copying pci.ids...")
-		cp("/usr/share/hwdata/pci.ids", pci_ids_path)
+		ip = addresses[0]['addr']
+		nmask = addresses[0]['netmask']
 	else:
-		print("Warning: cannot find pci.ids ")
+		if nmask is None:
+			raise FatalError("Provide a netmask if manually setting the IP, e.g. -n 255.255.255.0")
+		ip = args.server
 
-print("Generating dnsmasq configuration...")
-# useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
-dnsmasq_generated_config = ""
+	return iface, ip, nmask
 
-if interface is not None:
-	dnsmasq_generated_config += """interface = {iface}
-bind-interfaces
-""".format(iface=interface)
 
-dnsmasq_generated_config += """port=0
-dhcp-leasefile=dnsmasq.leases
+def copy_pxelinux_files(syslinux_install_dir: str, pci_ids_path: Union[str, None]) -> None:
+	"""
 
-enable-tftp
-tftp-root={pwd}/tftp
-dhcp-option-force=66,{ip} # TFTP server
+	:param syslinux_install_dir: Directory where syslinux is installed, system-wide
+	:param pci_ids_path: Path to the pci.ids file (optional)
+	:return:
+	"""
+	pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk"]
+	pxelinux_files.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
+	pxelinux_files.extend(["reboot.c32", "poweroff.c32"])
+	for pxe_file in pxelinux_files:
+		src = syslinux_install_dir + pxe_file
+		dst = "tftp/boot/" + pxe_file
+		if not os.path.isfile(dst):
+			if os.path.isfile(src):
+				print("Copying " + pxe_file + "...")
+				cp(src, dst)
+			else:
+				raise FatalError("Cannot find " + src)
 
-log-dhcp # More info on what's going on
-dhcp-no-override # Don't put useless fields in DHCP offer
-dhcp-range={ip},proxy
+	if pci_ids_path is None:
+		return
 
-pxe-service=X86PC, "PXE boot NOW", boot/lpxelinux # It adds the .0 by itself
-dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
+	pci_ids = "tftp/boot/pci.ids"
+	if not os.path.isfile(pci_ids):
+		try:
+			print("Copying pci.ids...")
+			cp(pci_ids_path, pci_ids)
+		except (FileNotFoundError, OSError) as why:
+			print("Warning: cannot copy pci.ids: {}".format(str(why)))
 
-# These don't work in Proxy DHCP mode, apparently:
-# dhcp-boot=boot/lpxelinux.0
-# dhcp-option-force=209,"pxelinux.cfg/default" # PXELINUX config file (it's the default anyway)
-# dhcp-option-force=210,/boot/ # PathPrefix, doesn't seem to be needed (See RFC 5071)
-""".format(ip=server, pwd=os.getcwd())
 
-with open(DNSMASQCONF, "w") as config_file:
-	config_file.write(dnsmasq_generated_config)
-os.chmod(DNSMASQCONF, os.stat(DNSMASQCONF).st_mode | stat.S_IROTH)
+def generate_dnsmasq_configuration(interface: Union[str, None], server: str) -> None:
+	"""
+	Generate, validate and save dnsmasq configuration
 
-if which("dnsmasq") is None:
-	print("dnsmasq binary not found in PATH")
-	safe_exit(2)
+	:param interface: Network interface
+	:param server: IP of the TFTP and NFS server
+	:return: Nothing
+	"""
+	print("Generating dnsmasq configuration...")
+	# useful stuff: https://wiki.archlinux.org/index.php/Dnsmasq#PXE_server
+	dnsmasq_generated_config = ""
 
-result = call(["dnsmasq", "-d", "--test", "-C", DNSMASQCONF])
-if result != 0:
-	print("dnsmasq returned " + str(result))
-	safe_exit(result)
+	# Could still be "none" when providing IP and netmask, but it's not mandatory
+	if interface is not None:
+		dnsmasq_generated_config += """interface = {iface}
+	bind-interfaces
+	""".format(iface=interface)
 
-os.makedirs("tftp/boot/iso", exist_ok=True)
+	dnsmasq_generated_config += """port=0
+	dhcp-leasefile=dnsmasq.leases
 
-getfile("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86+-5.01.zip", "memtest86+-5.01.bin")
-getfile("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
-getfile("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
+	enable-tftp
+	tftp-root={pwd}/tftp
+	dhcp-option-force=66,{ip} # TFTP server
 
-iso = []
+	log-dhcp # More info on what's going on
+	dhcp-no-override # Don't put useless fields in DHCP offer
+	dhcp-range={ip},proxy
 
-if args.iso is not None:
-	iso.extend(args.iso)
+	pxe-service=X86PC, "PXE boot NOW", boot/lpxelinux # It adds the .0 by itself
+	dhcp-option=vendor:PXEClient,6,2b # "kill multicast"
 
-try:
-	iso_files_found = os.listdir("iso")
-	for name in iso_files_found:
-		iso.append("iso/" + name)
-except FileNotFoundError:
-	pass
+	# These don't work in Proxy DHCP mode, apparently:
+	# dhcp-boot=boot/lpxelinux.0
+	# dhcp-option-force=209,"pxelinux.cfg/default" # PXELINUX config file (it's the default anyway)
+	# dhcp-option-force=210,/boot/ # PathPrefix, doesn't seem to be needed (See RFC 5071)
+	""".format(ip=server, pwd=os.getcwd())
 
-if len(iso) > 0:
-	print("ISO files: {0}\n".format(str(iso)))
-	os.makedirs("nfs", exist_ok=True)
-	os.makedirs("tftp/boot/mounted", exist_ok=True)
+	with open(DNSMASQCONF, "w") as config_file:
+		config_file.write(dnsmasq_generated_config)
+	os.chmod(DNSMASQCONF, os.stat(DNSMASQCONF).st_mode | stat.S_IROTH)
 
-syslinux_generated_config = ""
+	if which("dnsmasq") is None:
+		raise FatalError("dnsmasq binary not found in PATH")
 
-for file in iso:
-	if not os.path.isfile(file):
-		print("{0} doesn't exist".format(file))
-		safe_exit(5)
+	sudocall_result = sudocall(["dnsmasq", "-d", "--test", "-C", DNSMASQCONF])
+	if sudocall_result != 0:
+		raise FatalError("dnsmasq returned " + str(sudocall_result), sudocall_result)
 
-	name = os.path.basename(file)
-	mount_directory = "{pwd}/nfs/{name}.mount".format(pwd=os.getcwd(), name=name)
+
+def find_bootable_files(paths) -> {list, list, list}:
+	"""
+	Check that supplied files and directories exist and determine what they are
+
+	:param paths: Path to ISO files, IMG files, directories and whatever else
+	:return: ISO files, IMG files, and directories
+	"""
+	iso_files = []
+	img_files = []
+	iso_directories = []
+
+	if paths is not None:
+		for file in args.iso:
+			if os.path.isdir(file):
+				iso_directories.append(file)
+			elif file.endsWith(".iso"):
+				iso_files.append(file)
+			else:
+				img_files.append(file)
+
+	return iso_files, img_files, iso_directories
+
+
+def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
+	"""
+	Mount an ISO file
+
+	:param path_to_iso: ISO file
+	:param mounted_files: Global list of mounted files
+	:return: Filename and directory where it was mounted
+	"""
+	if not os.path.isfile(path_to_iso):
+		raise FatalError("{0} doesn't exist".format(path_to_iso))
+
+	file_name = os.path.basename(path_to_iso)
+	mount_directory = "{cwd}/nfs/{name}.mount".format(cwd=os.getcwd(), name=file_name)
 
 	if " " in mount_directory:
-		print(
-			"NFS path {0} contains spaces so it won't work, move everything in a directory without spaces and retry".format(
-				mount_directory))
-		safe_exit(6)
+		raise FatalError(
+			"NFS path {0} contains spaces so it won't work, move everything in a directory without spaces and retry"
+			.format(mount_directory))
 
 	os.makedirs(mount_directory, exist_ok=True)
 
 	# Could be done "if result == 0", but if script crashes midway you'd need to unmount manually...
-	mounted.append(mount_directory)
+	mounted_files.append(mount_directory)
 
-	result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", file, mount_directory])
+	result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", path_to_iso, mount_directory])
 
 	if result != 0:
-		print("mount returned " + str(result))
-		safe_exit(result)
+		raise FatalError("mount returned " + str(result), result)
 
-	print("Generating syslinux config for {0}".format(name))
-	syslinux_generated_config += get_syslinux_config_for(name, mount_directory)
-	print()
+	return file_name, mount_directory
 
-with open(SYSLINUXCONF, "w") as config_file:
-	config_file.write(syslinux_generated_config)
-os.chmod(SYSLINUXCONF, os.stat(SYSLINUXCONF).st_mode | stat.S_IROTH)
 
-exports = ""
+def main(mounted) -> int:
+	# Quick setting a static IP:
+	# IFACE=enp3s0
+	# ip link set "${IFACE}" up
+	# ip addr flush dev "${IFACE}"
+	# ip addr add 10.80.7.1/24 dev "${IFACE}"
+	# flush is necessary only if this is done over and over again (e.g. in a script)
 
-for full_export in mounted:
-	exports += "{export} {ip}/{nm}(ro,all_squash,insecure,no_subtree_check)\n".format(export=full_export, ip=server, nm=netmask)
+	interface, server, netmask = get_network_parameters(args.interface, args.server, args.netmask)
+	del args.interface
+	del args.server
 
-if exports != "":
+	copy_pxelinux_files("/usr/lib/syslinux/bios/", "/usr/share/hwdata/pci.ids")
+
+	os.makedirs("tftp/boot/iso", exist_ok=True)
+	os.makedirs("tftp/boot/img/included", exist_ok=True)
+
+	generate_dnsmasq_configuration(interface, server)
+
+	get_img_file("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86+-5.01.zip", "memtest86+-5.01.bin")
+	get_img_file("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
+	get_img_file("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
+
+	# ISO files, IMG files ISo Directory, just to keep the symmetry of three-letter codes
+	iso, img, isd = find_bootable_files(args.iso)
+
+	if len(iso) > 0:
+		print("ISO files: {0}\n".format(str(iso)))
+		os.makedirs("nfs", exist_ok=True)
+		os.makedirs("tftp/boot/mounted", exist_ok=True)
+
+	syslinux_generated_config = ""
+
+	for file in iso:
+		name, mount_directory = mount_iso(file, mounted)
+
+		print("Generating syslinux config for {0}".format(name))
+		syslinux_generated_config += get_syslinux_config_for(name, server, mount_directory)
+
+	with open(GENERATEDISOCONF, "w") as config_file:
+		config_file.write(syslinux_generated_config)
+	os.chmod(GENERATEDISOCONF, os.stat(GENERATEDISOCONF).st_mode | stat.S_IROTH)
+
+	exports = ""
+
+	for full_export in mounted:
+		exports += "{export} {ip}/{nm}(ro,all_squash,insecure,no_subtree_check)\n"\
+			.format(export=full_export, ip=server, nm=netmask)
+
+	if exports != "":
+		if args.nfs:
+			configure_nfs("# Created by pxenow\n" + exports, args.sudo)
+		else:
+			print("Almost done: add this to /etc/exports, run 'exportfs -a' and start your NFS server:")
+			print("---------------------------------------------------------------------------------")
+			print(exports)
+			print("---------------------------------------------------------------------------------")
+
+	try:
+		returned = sudocall_wait(["dnsmasq", "-d", "-C", DNSMASQCONF])
+		if returned != 0:
+			raise FatalError("Failed launching dnsmasq", returned)
+	except KeyboardInterrupt:
+		print("Keyboard interrupt (ctrl+C) detected")
+
 	if args.nfs:
-		configure_nfs()
-	else:
-		print("Almost done: add this to /etc/exports, run 'exportfs -a' and start your NFS server:")
-		print("---------------------------------------------------------------------------------")
-		print(exports)
-		print("---------------------------------------------------------------------------------")
+		print("Stopping NFS server...")
+		sudocall(["systemctl", "stop", "nfs-server"])
 
-try:
-	call(["dnsmasq", "-d", "-C", DNSMASQCONF])
-except KeyboardInterrupt:
-	print("Keyboard interrupt (ctrl+C) detected")
+	return 0
 
-if args.nfs:
-	print("Stopping NFS server...")
-	sudocall(["systemctl", "stop", "nfs-server"])
 
-safe_exit(0)
+if __name__ == "__main__":
+	parser = argparse.ArgumentParser(description='Create a PXE server right here, right now.')
+	parser.add_argument('iso', nargs='*', type=str, help="Path to ISO images")
+	parser.add_argument('-i', '--interface', type=str, help="Interface to bind, e.g. enp3s0")
+	parser.add_argument('-n', '--netmask', type=str, help="Netmask, used only if -s is also used")
+	parser.add_argument('-s', '--server', type=str,
+		help="IP address of current machine, used as TFTP, DHCP and NFS server")
+	# parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries for each ISO")
+	parser.add_argument('-N', '--nfs', action='store_true', help="Blindly overwrite /etc/exports and manage NFS server")
+	parser.add_argument('-S', '--sudo', action='store_true', help="Use sudo for commands that require root permissions")
+	parser.set_defaults(memdisk=False)
+	parser.set_defaults(nfs=False)
+	parser.set_defaults(sudo=False)
+	args = parser.parse_args()
+
+	mounted = []
+	DNSMASQCONF = "dnsmasq-pxe.conf"
+	GENERATEDIMGCONF = "tftp/boot/pxelinux.cfg/img-generated.conf"
+	GENERATEDISOCONF = "tftp/boot/pxelinux.cfg/iso-generated.conf"
+	ETCEXPORTS = "/etc/exports"
+
+	mounted_list = []
+	try:
+		code = main(mounted_list)
+	except FatalError as e:
+		print(str(e))
+		if e.code is None:
+			code = 1
+		else:
+			code = e.code
+	finally:
+		if len(mounted_list) > 0:
+			errors = 0
+			print("Unmounting all ISOs...")
+			for directory in mounted:
+				print("Unmounting {0}...".format(directory))
+				errors += sudocall(["umount", directory])
+			if errors != 0:
+				print("Warning: some umount(s) failed, try stopping/restarting the NFS server and re-running the script")
+	exit(code)
