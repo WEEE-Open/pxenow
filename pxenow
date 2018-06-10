@@ -363,7 +363,7 @@ def copy_pxelinux_files(syslinux_install_dir: str, pci_ids_path: Union[str, None
 	:param pci_ids_path: Path to the pci.ids file (optional)
 	:return:
 	"""
-	pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32", "memdisk"]
+	pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "vesamenu.c32", "menu.c32", "libutil.c32", "memdisk"]
 	pxelinux_files.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
 	pxelinux_files.extend(["reboot.c32", "poweroff.c32"])
 	for pxe_file in pxelinux_files:

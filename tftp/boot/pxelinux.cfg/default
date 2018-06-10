@@ -1,4 +1,4 @@
-UI menu.c32
+UI vesamenu.c32
 TIMEOUT 0
 
 MENU TITLE Yay PXE boot!
@@ -26,13 +26,6 @@ MENU COLOR help         30;47
 MENU COLOR timeout_msg  30;47
 MENU COLOR timeout      1;30;47
 MENU COLOR tabmsg       1;30;47
-
-#LABEL reload
-#	MENU LABEL Reload
-#	TEXT HELP
-#	Reload menu from TFTP server
-#	ENDTEXT
-#	COM32 menu.c32
 
 INCLUDE pxelinux.cfg/iso-generated.conf
 
@@ -94,6 +87,13 @@ LABEL -
 	MENU LABEL Boot second hard disk
 
 MENU SEPARATOR
+
+LABEL reload
+	MENU LABEL Reload menu
+	TEXT HELP
+	Reload menu from TFTP server
+	ENDTEXT
+	COM32 vesamenu.c32
 
 LABEL reboot
 	MENU LABEL Reboot
