@@ -6,6 +6,8 @@ import stat
 import urllib.request
 import zipfile
 import tempfile
+import re
+from collections import namedtuple
 # import errno
 from netifaces import AF_INET
 from shutil import copy2 as cp, which
@@ -30,7 +32,7 @@ def get_img_file(printable_name: str, destination_file: str, url: str, filename_
 	:param filename_in_zip: This will be extracted and moved to destination_file.
 	:return:
 	"""
-	if os.path.isfile("tftp/boot/img/{0}".format(destination_file)):
+	if os.path.isfile("tftp/boot/img/included/{0}".format(destination_file)):
 		print("{0} found".format(printable_name))
 	else:
 		if filename_in_zip == "":
@@ -186,6 +188,7 @@ def write_content_sudocall(content: str, destination: str) -> None:
 	with tempfile.NamedTemporaryFile() as temp_exports, open(temp_exports.name, 'w') as temp_exports_open:
 		try:
 			temp_exports_open.write(content)
+			temp_exports_open.flush()
 		except IOError:
 			print("Cannot write to temporary file {0}".format(temp_exports.name))
 			return
@@ -194,51 +197,115 @@ def write_content_sudocall(content: str, destination: str) -> None:
 			raise FatalError("Cannot call cp {} {}".format(temp_exports.name, destination), sudocall_result)
 
 
-def get_syslinux_config_for(name: str, server: str, root_directory: str) -> str:
+def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap: Union[None, tuple]) -> str:
 	"""
 	Generate a Syslinux/PXELINUX configuration entry for an ISO/directory
 
 	:param name: Entry name (human-readable)
 	:param server: Server IP
 	:param root_directory: Directory where ISO was mounted, or extracted
+	:param keymap: Keymaps, for entries that support them
 	:return:
 	"""
-	maybe_vmlinuz = ("{0}/casper/vmlinuz".format(root_directory), "{0}/casper/vmlinuz.efi".format(root_directory))
-	maybe_initrd = ("{0}/casper/initrd.lz".format(root_directory), "{0}/casper/initrd".format(root_directory))
+	EntryParameters = namedtuple("EntryParameters", "name server vmlinuz initrd root_directory keymap")
+
+	maybe_vmlinuz = (
+		"{}/casper/vmlinuz".format(root_directory),
+		"{}/casper/vmlinuz.efi".format(root_directory),
+		"{}/arch/boot/x86_64/vmlinuz".format(root_directory)
+	)
+	maybe_initrd = (
+		"{}/casper/initrd.lz".format(root_directory),
+		"{}/casper/initrd".format(root_directory),
+		"{}/arch/boot/x86_64/archiso.img".format(root_directory)
+	)
 
 	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, name)
 	initrd_src = search_for("initrd", maybe_initrd, name)
 
 	vmlinuz = "mounted/{0}-vmlinuz".format(name)
-	initrd = "mounted/{0}-initrd.lz".format(name)
+	initrd = "mounted/{0}-initrd".format(name)
 
 	relink(vmlinuz_src, "tftp/boot/" + vmlinuz)
 	relink(initrd_src, "tftp/boot/" + initrd)
 
-	config = """
-	LABEL -
-	MENU LABEL {name} (NFS)
+	ep = EntryParameters(
+		name=name,
+		server=server,
+		vmlinuz=vmlinuz,
+		initrd=initrd,
+		root_directory=root_directory,
+		keymap=keymap
+	)
+
+	if os.path.isdir("{}/arch/boot/x86_64/".format(root_directory)):
+		print("{} seems to be Arch Linux x86_64".format(name))
+		return syslinux_config_arch(ep)
+	else:
+		print("{} seems to be Ubuntu (derivative) or unrecognized".format(name))
+		return syslinux_config_ubuntu(ep)
+
+
+def syslinux_config_ubuntu(ep):
+	name_compact = re.sub(r'\W+', '', ep.name)
+	config = ""
+
+	if ep.keymap is None:
+		keymaps = [""]
+	else:
+		keymaps = ep.keymap
+
+	for k in keymaps:
+		if k == "":
+			keyboard_description = ""
+			keyboard_param = ""
+		else:
+			keyboard_description = ", {} layout".format(k)
+			keyboard_param = " keyboard-configuration/layoutcode?=" + k
+		config += """
+	LABEL {label}{keymap}
+	MENU LABEL {name} (NFS{keyboard_description})
 	TEXT HELP
-	Boot with kernel+initrd from TFTP,
-	and squashfs from NFS server {ip}
+		Boot with kernel+initrd from TFTP,
+		and squashfs from NFS server {ip}
 	ENDTEXT
 	KERNEL {vmlinuz}
-	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd} ---
-	""".format(name=name, ip=server, vmlinuz=vmlinuz, initrd=initrd, mounted=root_directory)
-
-	# TODO: re-enable if ever needed, but requires another symlink to the ISO
-	# if args.memdisk:
-	# 	config += """
-	# LABEL -
-	# MENU LABEL {name} (memdisk)
-	# TEXT HELP
-	# Boot from RAM, if the ISO fits
-	# ENDTEXT
-	# KERNEL memdisk
-	# APPEND initrd=iso/{name}
-	# """.format(name=name)
+	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd}{keyboard_param} ---
+		""".format(
+			label=name_compact,
+			name=ep.name,
+			ip=ep.server,
+			vmlinuz=ep.vmlinuz,
+			initrd=ep.initrd,
+			mounted=ep.root_directory,
+			keyboard_param=keyboard_param,
+			keymap=k,
+			keyboard_description=keyboard_description
+		)
 
 	return config
+
+
+# TODO: doesn't work
+def syslinux_config_arch(ep):
+	return """
+	LABEL -
+	MENU LABEL {label}
+	TEXT HELP
+		Boot Arch Linux with kernel+initramfs from TFTP,
+		and root fs from NFS server {ip}
+	ENDTEXT
+	LINUX {vmlinuz}
+	INITRD {initrd}
+	APPEND archisobasedir=arch archiso_nfs_srv={ip}:{mounted}
+	SYSAPPEND 2
+	""".format(
+		label=ep.name,
+		ip=ep.server,
+		vmlinuz=ep.vmlinuz,
+		initrd=ep.initrd,
+		mounted=ep.root_directory
+	)
 
 
 def search_for(what: str, where: tuple, iso_name: str) -> str:
@@ -252,7 +319,7 @@ def search_for(what: str, where: tuple, iso_name: str) -> str:
 	"""
 	for maybe in where:
 		if os.path.isfile(maybe):
-			print("{file} found at {path}".format(file=what, path=maybe))
+			#  print("{file} found at {path}".format(file=what, path=maybe))
 			return maybe
 	raise FatalError("{file} not found in {iso}".format(file=what, iso=iso_name))
 
@@ -439,6 +506,12 @@ def main(mounted) -> int:
 	del args.interface
 	del args.server
 
+	if args.keymaps is None:
+		keymaps = None
+	else:
+		keymaps = args.keymaps.split(",")
+	del args.keymaps
+
 	copy_pxelinux_files("/usr/lib/syslinux/bios/", "/usr/share/hwdata/pci.ids")
 
 	os.makedirs("tftp/boot/iso", exist_ok=True)
@@ -464,7 +537,7 @@ def main(mounted) -> int:
 		name, mount_directory = mount_iso(file, mounted)
 
 		print("Generating syslinux config for {0}".format(name))
-		syslinux_generated_config += get_syslinux_config_for(name, server, mount_directory)
+		syslinux_generated_config += get_syslinux_config_for(name, mount_directory, server, keymaps)
 
 	with open(GENERATEDISOCONF, "w") as config_file:
 		config_file.write(syslinux_generated_config)
@@ -506,6 +579,7 @@ if __name__ == "__main__":
 	parser.add_argument('-n', '--netmask', type=str, help="Netmask, used only if -s is also used")
 	parser.add_argument('-s', '--server', type=str,
 		help="IP address of current machine, used as TFTP, DHCP and NFS server")
+	parser.add_argument('-k', '--keymaps', type=str, help="Comma-separated list of keymaps")
 	# parser.add_argument('-m', '--memdisk', action='store_true', help="Generate memdisk entries for each ISO")
 	parser.add_argument('-N', '--nfs', action='store_true', help="Blindly overwrite /etc/exports and manage NFS server")
 	parser.add_argument('-S', '--sudo', action='store_true', help="Use sudo for commands that require root permissions")

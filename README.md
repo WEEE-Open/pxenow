@@ -30,6 +30,7 @@ tested extensively
 ## TODO (pull requests welcome)
 
 - Support Ubuntu and derivatives installer, too (generate another config for each ISO)
+- Get Arch Linux boot working
 - Docker container or Vagrant VM, maybe?
 - Support for more distros
 - Support for UEFI systems
@@ -39,7 +40,8 @@ tested extensively
 ## Usage
 
 ```
-usage: pxenow [-h] [-i INTERFACE] [-n NETMASK] [-s SERVER] [-N] [-S]
+usage: pxenow [-h] [-i INTERFACE] [-n NETMASK] [-s SERVER] [-k KEYMAPS] [-N]
+              [-S]
               [iso [iso ...]]
 
 Create a PXE server right here, right now.
@@ -56,6 +58,8 @@ optional arguments:
   -s SERVER, --server SERVER
                         IP address of current machine, used as TFTP, DHCP and
                         NFS server
+  -k KEYMAPS, --keymaps KEYMAPS
+                        Comma-separated list of keymaps
   -N, --nfs             Blindly overwrite /etc/exports and manage NFS server
   -S, --sudo            Use sudo for commands that require root permissions
 ```
