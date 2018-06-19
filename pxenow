@@ -246,8 +246,12 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 		return syslinux_config_ubuntu(ep)
 
 
+def name_compact(name: str):
+	return re.sub(r'\W+', '', name)
+
+
 def syslinux_config_ubuntu(ep):
-	name_compact = re.sub(r'\W+', '', ep.name)
+	label = name_compact(ep.name)
 	config = ""
 
 	if ep.keymap is None:
@@ -272,7 +276,7 @@ def syslinux_config_ubuntu(ep):
 	KERNEL {vmlinuz}
 	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd}{keyboard_param} ---
 		""".format(
-			label=name_compact,
+			label=label,
 			name=ep.name,
 			ip=ep.server,
 			vmlinuz=ep.vmlinuz,
@@ -289,18 +293,19 @@ def syslinux_config_ubuntu(ep):
 # TODO: doesn't work
 def syslinux_config_arch(ep):
 	return """
-	LABEL -
-	MENU LABEL {label}
+	LABEL {label}
+	MENU LABEL {name}
 	TEXT HELP
 		Boot Arch Linux with kernel+initramfs from TFTP,
 		and root fs from NFS server {ip}
 	ENDTEXT
 	LINUX {vmlinuz}
 	INITRD {initrd}
-	APPEND archisobasedir=arch archiso_nfs_srv={ip}:{mounted}
+	APPEND ip=:: archisobasedir=arch archiso_nfs_srv={ip}:{mounted}
 	SYSAPPEND 2
 	""".format(
-		label=ep.name,
+		label=name_compact(ep.name),
+		name=ep.name,
 		ip=ep.server,
 		vmlinuz=ep.vmlinuz,
 		initrd=ep.initrd,
@@ -556,7 +561,7 @@ def generate_img_config(img: list):
 	os.chmod(GENERATEDIMGCONF, os.stat(GENERATEDIMGCONF).st_mode | stat.S_IROTH)
 
 
-def main(mounted) -> int:
+def main(mounted_files) -> int:
 	# Quick setting a static IP:
 	# IFACE=enp3s0
 	# ip link set "${IFACE}" up
@@ -588,13 +593,13 @@ def main(mounted) -> int:
 	# ISO files, IMG files, ISo Directory, just to keep the symmetry of three-letter codes
 	iso, img, isd = find_bootable_files(args.iso)
 
-	generate_iso_config(iso, keymaps, mounted, server)
-	generate_isd_config(isd, keymaps, mounted, server)
+	generate_iso_config(iso, keymaps, mounted_files, server)
+	generate_isd_config(isd, keymaps, mounted_files, server)
 	generate_img_config(img)
 
 	exports = ""
 
-	for full_export in mounted:
+	for full_export in mounted_files:
 		exports += "{export} {ip}/{nm}(ro,all_squash,insecure,no_subtree_check)\n"\
 			.format(export=full_export, ip=server, nm=netmask)
 
