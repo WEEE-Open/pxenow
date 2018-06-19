@@ -1,4 +1,3 @@
-#UI vesamenu.c32
 UI menu.c32
 TIMEOUT 0
 
@@ -57,24 +56,6 @@ LABEL netbootxyz
 INCLUDE pxelinux.cfg/iso-generated.conf
 INCLUDE pxelinux.cfg/isd-generated.conf
 INCLUDE pxelinux.cfg/img-generated.conf
-
-#LABEL lubuntu_test
-	#MENU LABEL Lubuntu (test)
-	#KERNEL iso/lubuntu/casper/vmlinuz
-
-	# Does absolutely nothing, since "fetch" is unsupported for unfathomable reasons
-	#APPEND initrd=iso/lubuntu/casper/initrd.lz fetch=tftp://10.13.37.2/boot/iso/lubuntu/casper/rootfs.squashfs
-
-	# initrd immediately searches for /dev/sr0 and finds nothing, obviously
-	#APPEND file=iso/lubuntu/preseed/lubuntu.seed boot=casper initrd=iso/lubuntu/casper/initrd.lz quiet splash ---
-
-	# Doesn't work, because reasons
-	#APPEND initrd=iso/lubuntu/casper/initrd.lz root=iso/lubuntu/casper/rootfs.squashfs rootfstype=iso9660 rootflags=loop
-
-	# Fails with "/casper/vmlinuz: not found" but may be useful for other distros?
-	#CONFIG iso/lubuntu/isolinux/isolinux.cfg
-	#APPEND iso/lubuntu/isolinux/
-
 
 MENU SEPARATOR
 

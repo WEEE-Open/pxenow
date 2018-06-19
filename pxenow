@@ -514,6 +514,19 @@ def generate_iso_config(iso: list, keymaps: Union[None, tuple], mounted_files: l
 	os.chmod(GENERATEDISOCONF, os.stat(GENERATEDISOCONF).st_mode | stat.S_IROTH)
 
 
+def generate_isd_config(isd: list, keymaps: Union[None, tuple], mounted_files: list, server: str):
+	syslinux_generated_config = ""
+
+	if len(isd) > 0:
+		syslinux_generated_config = "\tMENU SEPARATOR\n\n"
+
+	# TODO: implement
+
+	with open(GENERATEDISDCONF, "w") as config_file:
+		config_file.write(syslinux_generated_config)
+	os.chmod(GENERATEDISDCONF, os.stat(GENERATEDISDCONF).st_mode | stat.S_IROTH)
+
+
 def generate_img_config(img: list):
 	syslinux_generated_config = ""
 
@@ -572,10 +585,11 @@ def main(mounted) -> int:
 	get_img_file("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
 	get_img_file("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
 
-	# ISO files, IMG files ISo Directory, just to keep the symmetry of three-letter codes
+	# ISO files, IMG files, ISo Directory, just to keep the symmetry of three-letter codes
 	iso, img, isd = find_bootable_files(args.iso)
 
 	generate_iso_config(iso, keymaps, mounted, server)
+	generate_isd_config(isd, keymaps, mounted, server)
 	generate_img_config(img)
 
 	exports = ""
@@ -627,6 +641,7 @@ if __name__ == "__main__":
 	DNSMASQCONF = "dnsmasq-pxe.conf"
 	GENERATEDIMGCONF = "tftp/boot/pxelinux.cfg/img-generated.conf"
 	GENERATEDISOCONF = "tftp/boot/pxelinux.cfg/iso-generated.conf"
+	GENERATEDISDCONF = "tftp/boot/pxelinux.cfg/isd-generated.conf"
 	ETCEXPORTS = "/etc/exports"
 
 	mounted_list = []
