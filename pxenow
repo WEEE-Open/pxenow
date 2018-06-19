@@ -83,7 +83,7 @@ def guess_interface() -> str:
 
 def relink(source: str, destination: str) -> None:
 	"""
-	Create a symlink. If something else with the same name already exists, delete and replace with symlink.
+	Create a symlink. If it already exists, make sure it is correct.
 
 	:param source: real file (absolute path required!)
 	:param destination: the link itself
@@ -97,9 +97,9 @@ def relink(source: str, destination: str) -> None:
 		else:
 			os.remove(destination)
 	elif os.path.exists(destination):
-		os.remove(destination)
+		raise FatalError("Cannot create link from {}: file already exists and is not a link".format(destination))
 
-	print("Creating symlink {frm} -> {to}...".format(frm=destination, to=source))
+	print("Creating symlink {frm} pointing to {to}...".format(frm=destination, to=source))
 	os.symlink(source, destination)
 
 
@@ -494,6 +494,55 @@ def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
 	return file_name, mount_directory
 
 
+def generate_iso_config(iso: list, keymaps: Union[None, tuple], mounted_files: list, server: str):
+	syslinux_generated_config = ""
+
+	if len(iso) > 0:
+		print("ISO files: {0}\n".format(str(iso)))
+		os.makedirs("nfs", exist_ok=True)
+		os.makedirs("tftp/boot/mounted", exist_ok=True)
+
+		syslinux_generated_config = "\tMENU SEPARATOR\n\n"
+
+	for file in iso:
+		name, mount_directory = mount_iso(file, mounted_files)
+		print("Generating syslinux config for {0}".format(name))
+		syslinux_generated_config += get_syslinux_config_for(name, mount_directory, server, keymaps)
+
+	with open(GENERATEDISOCONF, "w") as config_file:
+		config_file.write(syslinux_generated_config)
+	os.chmod(GENERATEDISOCONF, os.stat(GENERATEDISOCONF).st_mode | stat.S_IROTH)
+
+
+def generate_img_config(img: list):
+	syslinux_generated_config = ""
+
+	if len(img) > 0:
+		print("IMG files: {0}\n".format(str(img)))
+		os.makedirs("tftp/boot/img", exist_ok=True)
+
+		syslinux_generated_config = "\tMENU SEPARATOR\n\n"
+
+	for file in img:
+		file_name = os.path.basename(file)
+
+		print("Generating syslinux config for {0}".format(img))
+		syslinux_generated_config += """
+	LABEL -
+	MENU LABEL {name}
+	TEXT HELP
+	Launch {name} as image file
+	ENDTEXT
+	KERNEL memdisk
+	APPEND initrd=img/{name}
+		""".format(name=file_name)
+		relink(file, "tftp/boot/img/" + file_name)
+
+	with open(GENERATEDIMGCONF, "w") as config_file:
+		config_file.write(syslinux_generated_config)
+	os.chmod(GENERATEDIMGCONF, os.stat(GENERATEDIMGCONF).st_mode | stat.S_IROTH)
+
+
 def main(mounted) -> int:
 	# Quick setting a static IP:
 	# IFACE=enp3s0
@@ -526,22 +575,8 @@ def main(mounted) -> int:
 	# ISO files, IMG files ISo Directory, just to keep the symmetry of three-letter codes
 	iso, img, isd = find_bootable_files(args.iso)
 
-	if len(iso) > 0:
-		print("ISO files: {0}\n".format(str(iso)))
-		os.makedirs("nfs", exist_ok=True)
-		os.makedirs("tftp/boot/mounted", exist_ok=True)
-
-	syslinux_generated_config = ""
-
-	for file in iso:
-		name, mount_directory = mount_iso(file, mounted)
-
-		print("Generating syslinux config for {0}".format(name))
-		syslinux_generated_config += get_syslinux_config_for(name, mount_directory, server, keymaps)
-
-	with open(GENERATEDISOCONF, "w") as config_file:
-		config_file.write(syslinux_generated_config)
-	os.chmod(GENERATEDISOCONF, os.stat(GENERATEDISOCONF).st_mode | stat.S_IROTH)
+	generate_iso_config(iso, keymaps, mounted, server)
+	generate_img_config(img)
 
 	exports = ""
 

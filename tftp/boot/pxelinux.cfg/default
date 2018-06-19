@@ -1,7 +1,11 @@
-UI vesamenu.c32
+#UI vesamenu.c32
+UI menu.c32
 TIMEOUT 0
 
 MENU TITLE Yay PXE boot!
+MENU ROWS 14
+MENU TABMSGROW 20
+MENU CMDLINEROW 20
 
 # Dark "theme":
 #MENU COLOR border       34;40
@@ -29,8 +33,6 @@ MENU COLOR tabmsg       1;30;47
 
 INCLUDE pxelinux.cfg/iso-generated.conf
 
-MENU SEPARATOR
-
 LABEL memtest
 	MENU LABEL Memtest86+ v5.01
 	KERNEL img/memtest
@@ -53,8 +55,6 @@ LABEL netbootxyz
 	iPXE over the internet!
 	ENDTEXT
 	KERNEL img/included/netbootxyz
-
-MENU SEPARATOR
 
 INCLUDE pxelinux.cfg/img-generated.conf
 
@@ -91,9 +91,10 @@ MENU SEPARATOR
 LABEL reload
 	MENU LABEL Reload menu
 	TEXT HELP
-	Reload menu from TFTP server
+	Reload (text mode) menu from TFTP server
+	"KERNEL vesamenu.c32" should reload VESA menu, but doesn't work
 	ENDTEXT
-	COM32 vesamenu.c32
+	COM32 menu.c32
 
 LABEL reboot
 	MENU LABEL Reboot
