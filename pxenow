@@ -486,9 +486,9 @@ def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
 	mounted_files.append(mount_directory)
 
 	# TODO: detect if already mounted?
-	result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", path_to_iso, mount_directory])
+	sudocall_result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", path_to_iso, mount_directory])
 
-	if result != 0:
+	if sudocall_result != 0:
 		raise FatalError("mount returned " + str(result), result)
 
 	return file_name, mount_directory
