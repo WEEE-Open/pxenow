@@ -31,8 +31,6 @@ MENU COLOR timeout_msg  30;47
 MENU COLOR timeout      1;30;47
 MENU COLOR tabmsg       1;30;47
 
-INCLUDE pxelinux.cfg/iso-generated.conf
-
 LABEL memtest
 	MENU LABEL Memtest86+ v5.01
 	KERNEL img/memtest
@@ -56,6 +54,8 @@ LABEL netbootxyz
 	ENDTEXT
 	KERNEL img/included/netbootxyz
 
+INCLUDE pxelinux.cfg/iso-generated.conf
+INCLUDE pxelinux.cfg/isd-generated.conf
 INCLUDE pxelinux.cfg/img-generated.conf
 
 #LABEL lubuntu_test
