@@ -9,7 +9,6 @@ import tempfile
 import re
 from collections import namedtuple
 # import errno
-from netifaces import AF_INET
 from shutil import copy2 as cp, which
 from subprocess import call, Popen
 from typing import Union
@@ -346,7 +345,7 @@ def get_network_parameters(iface: Union[str, None], ip: Union[str, None], nmask:
 		if iface is None:
 			iface = guess_interface()
 
-		addresses = netifaces.ifaddresses(iface)[AF_INET]
+		addresses = netifaces.ifaddresses(iface)[netifaces.AF_INET]
 
 		if len(addresses) == 0:
 			raise FatalError("No addresses found for interface " + str(args.interface))
