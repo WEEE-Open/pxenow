@@ -339,7 +339,10 @@ def get_network_parameters(iface: Union[str, None], ip: Union[str, None], nmask:
 	:return: Interface, IP, netmask
 	"""
 	if ip is None:
-		import netifaces
+		try:
+			import netifaces
+		except ModuleNotFoundError:
+			raise FatalError("Module netifaces not found, install it or specify IP and netmask (-s and -i parameters)")
 
 		# No IP given and no interface, so we have to guess interface and obtain IP
 		if iface is None:
