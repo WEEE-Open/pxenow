@@ -360,36 +360,53 @@ def get_network_parameters(iface: Union[str, None], ip: Union[str, None], nmask:
 	return iface, ip, nmask
 
 
-def copy_pxelinux_files(syslinux_install_dir: str, pci_ids_path: Union[str, None]) -> None:
-	"""
+def copy_files_paths(destination: str, filename: str, source_paths: tuple):
+	if len(source_paths) < 1:
+		raise Exception(f"Trying to copy {filename} to {destination} but no source paths provided")
 
-	:param syslinux_install_dir: Directory where syslinux is installed, system-wide
-	:param pci_ids_path: Path to the pci.ids file (optional)
-	:return:
-	"""
-	pxelinux_files = ["pxelinux.0", "lpxelinux.0", "ldlinux.c32", "vesamenu.c32", "menu.c32", "libutil.c32", "memdisk"]
-	pxelinux_files.extend(["hdt.c32", "libmenu.c32", "libcom32.c32", "libgpl.c32"])  # for HDT
-	pxelinux_files.extend(["reboot.c32", "poweroff.c32"])
-	for pxe_file in pxelinux_files:
-		src = syslinux_install_dir + pxe_file
-		dst = "tftp/boot/" + pxe_file
-		if not os.path.isfile(dst):
-			if os.path.isfile(src):
-				print("Copying " + pxe_file + "...")
-				cp(src, dst)
-			else:
-				raise FatalError("Cannot find " + src)
+	found = False
+	for path in source_paths:
+		src = path + filename
+		if os.path.isfile(src):
+			found = True
+			break
+	if found:
+		print(f"Copying {filename} (found at {src})")
+		# noinspection PyUnboundLocalVariable
+		cp(src, destination)
+	else:
+		raise FatalError(f"Cannot find {filename}, tried: {str(source_paths)}")
 
-	if pci_ids_path is None:
-		return
+def copy_pxelinux_files() -> None:
+	# First path is Arch Linux, second is (X)ubuntu
+	pxelinux_dirs = ("/usr/lib/syslinux/bios/", "/usr/lib/PXELINUX/")
+	syslinux_modules_dirs = ("/usr/lib/syslinux/bios/", "/usr/lib/syslinux/modules/bios/")
+	syslinux_other_dirs = ("/usr/lib/syslinux/bios/", "/usr/lib/syslinux/")
+	pci_ids_path = ("/usr/share/hwdata/", "/usr/share/misc/")
 
-	pci_ids = "tftp/boot/pci.ids"
-	if not os.path.isfile(pci_ids):
+	files = {
+		"pxelinux.0": pxelinux_dirs,
+		"lpxelinux.0": pxelinux_dirs,
+		"ldlinux.c32": syslinux_modules_dirs,
+		"vesamenu.c32": syslinux_modules_dirs,
+		"menu.c32": syslinux_modules_dirs,
+		"libutil.c32": syslinux_modules_dirs,
+		"hdt.c32": syslinux_modules_dirs,  # for HDT
+		"libmenu.c32": syslinux_modules_dirs,  # for HDT
+		"libcom32.c32": syslinux_modules_dirs,  # for HDT
+		"libgpl.c32": syslinux_modules_dirs,  # for HDT
+		"reboot.c32": syslinux_modules_dirs,
+		"poweroff.c32": syslinux_modules_dirs,
+		"memdisk": syslinux_other_dirs,
+		"pci.ids": pci_ids_path
+	}
+
+	for filename, paths in files.items():
 		try:
-			print("Copying pci.ids...")
-			cp(pci_ids_path, pci_ids)
+			copy_files_paths("tftp/boot/" + filename, filename, paths)
 		except (FileNotFoundError, OSError) as why:
-			print("Warning: cannot copy pci.ids: {}".format(str(why)))
+			print()
+			raise FatalError(f"Cannot copy file: {str(why)}")
 
 
 def generate_dnsmasq_configuration(interface: Union[str, None], server: str) -> None:
@@ -578,7 +595,7 @@ def main(mounted_files) -> int:
 		keymaps = args.keymaps.split(",")
 	del args.keymaps
 
-	copy_pxelinux_files("/usr/lib/syslinux/bios/", "/usr/share/hwdata/pci.ids")
+	copy_pxelinux_files()
 
 	os.makedirs("tftp/boot/iso", exist_ok=True)
 	os.makedirs("tftp/boot/img/included", exist_ok=True)
