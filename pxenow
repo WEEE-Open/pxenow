@@ -9,9 +9,10 @@ import tempfile
 import re
 from collections import namedtuple
 # import errno
+from dataclasses import dataclass
 from shutil import copy2 as cp, which
 from subprocess import call, Popen
-from typing import Union
+from typing import Union, Optional
 
 
 class FatalError(Exception):
@@ -196,7 +197,17 @@ def write_content_sudocall(content: str, destination: str) -> None:
 			raise FatalError("Cannot call cp {} {}".format(tmp_file.name, destination), sudocall_result)
 
 
-def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap: Union[None, tuple]) -> str:
+@dataclass
+class EntryParameters:
+	name: str
+	server: str
+	vmlinuz: str
+	initrd: str
+	root_directory: str
+	keymap: Optional[tuple]
+
+
+def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap: Optional[tuple]) -> str:
 	"""
 	Generate a Syslinux/PXELINUX configuration entry for an ISO/directory
 
@@ -206,17 +217,18 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 	:param keymap: Keymaps, for entries that support them
 	:return:
 	"""
-	EntryParameters = namedtuple("EntryParameters", "name server vmlinuz initrd root_directory keymap")
 
 	maybe_vmlinuz = (
-		"{}/casper/vmlinuz".format(root_directory),
-		"{}/casper/vmlinuz.efi".format(root_directory),
-		"{}/arch/boot/x86_64/vmlinuz".format(root_directory)
+		f"{root_directory}/casper/vmlinuz",
+		f"{root_directory}/casper/vmlinuz.efi",  # TODO: glob this one too? Use regexes? What?
+		f"{root_directory}/arch/boot/x86_64/vmlinuz"
+		f"{root_directory}/live/vmlinuz-*-amd64"  # TODO: globbing
 	)
 	maybe_initrd = (
-		"{}/casper/initrd.lz".format(root_directory),
-		"{}/casper/initrd".format(root_directory),
-		"{}/arch/boot/x86_64/archiso.img".format(root_directory)
+		f"{root_directory}/casper/initrd.lz",
+		f"{root_directory}/casper/initrd",
+		f"{root_directory}/arch/boot/x86_64/archiso.img"
+		f"{root_directory}/live/initrd.img-*-amd64"  # TODO: globbing
 	)
 
 	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, name)
@@ -249,7 +261,17 @@ def name_compact(name: str):
 	return re.sub(r'\W+', '', name)
 
 
-def syslinux_config_ubuntu(ep):
+# localized debian live:
+# LABEL Italian (it)
+#   SAY "Booting Italian (it)..."
+#   linux /live/vmlinuz-4.9.0-7-amd64
+#   APPEND initrd=/live/initrd.img-4.9.0-7-amd64 boot=live components locales=it_IT.UTF-8
+#
+# Somewhat recent pxe boot parameters:
+# https://lists.debian.org/debian-live/2016/01/msg00008.html
+
+
+def syslinux_config_ubuntu(ep: EntryParameters):
 	label = name_compact(ep.name)
 	config = ""
 
@@ -290,7 +312,7 @@ def syslinux_config_ubuntu(ep):
 
 
 # TODO: doesn't work
-def syslinux_config_arch(ep):
+def syslinux_config_arch(ep: EntryParameters):
 	return """
 	LABEL {label}
 	MENU LABEL {name}
@@ -379,6 +401,7 @@ def copy_files_paths(destination: str, filename: str, source_paths: tuple):
 		cp(src, destination)
 	else:
 		raise FatalError(f"Cannot find {filename}, tried: {str(source_paths)}")
+
 
 def copy_pxelinux_files() -> None:
 	# First path is Arch Linux, second is (X)ubuntu
