@@ -184,16 +184,16 @@ def write_content_sudocall(content: str, destination: str) -> None:
 	:param destination: Where to place it
 	:return: Nothing
 	"""
-	with tempfile.NamedTemporaryFile() as temp_exports, open(temp_exports.name, 'w') as temp_exports_open:
+	with tempfile.NamedTemporaryFile() as tmp_file, open(tmp_file.name, 'w') as tmp:
 		try:
-			temp_exports_open.write(content)
-			temp_exports_open.flush()
+			tmp.write(content)
+			tmp.flush()
 		except IOError:
-			print("Cannot write to temporary file {0}".format(temp_exports.name))
+			print("Cannot write to temporary file {0}".format(tmp_file.name))
 			return
-		sudocall_result = sudocall(["cp", temp_exports.name, destination])
+		sudocall_result = sudocall(["cp", tmp_file.name, destination])
 		if sudocall_result != 0:
-			raise FatalError("Cannot call cp {} {}".format(temp_exports.name, destination), sudocall_result)
+			raise FatalError("Cannot call cp {} {}".format(tmp_file.name, destination), sudocall_result)
 
 
 def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap: Union[None, tuple]) -> str:

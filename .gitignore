@@ -1,6 +1,7 @@
 .idea
 iso/
 nfs/
+venv/
 
 tftp/*
 !tftp/

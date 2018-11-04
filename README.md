@@ -24,18 +24,16 @@ tested extensively
 - Python 3.6
 - dnsmasq
 - NFS
-- pxelinux (`syslinux` package on Arch Linux)
-- netifaces (`pip install netifaces`), optional, or use the `-s` and `-n` parameters
+- syslinux and pxelinux (on Arch Linux both are located in the `syslinux` package)
+- netifaces (optional) or use the `-s` and `-n` parameters
 
-## TODO (pull requests welcome)
+To install netifaces locally:
 
-- Support Ubuntu and derivatives installer, too (generate another config for each ISO)
-- Get Arch Linux boot working
-- Docker container or Vagrant VM, maybe?
-- Support for more distros
-- Support for UEFI systems
-- Support IPv6?
-- More PXE options in DHCP offer, for clients too old/broken/new?
+```Bash
+python -m virtualenv venv
+source venv/bin/activate
+python setup.py install
+```
 
 ## Usage
 
@@ -70,9 +68,6 @@ If none of these is specified, the script will try to guess the interface and ad
 With `-N` the script starts/stops the `nfs-server` service automatically and completely **overwrites**
 /etc/exports if needed. Without `-N` it outputs the correct exports and you'll have to copy them into
 /etc/exports and manually manage the NFS service.
-
-When using `-S`/`--sudo` note that it won't use `sudo` to write the `/etc/exports` file, so you'll need
-to add write permissions to "others" to get that working.
 
 ## License
 
