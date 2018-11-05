@@ -7,12 +7,11 @@ import urllib.request
 import zipfile
 import tempfile
 import re
-from collections import namedtuple
 # import errno
 from dataclasses import dataclass
 from shutil import copy2 as cp, which
 from subprocess import call, Popen
-from typing import Union, Optional
+from typing import Optional
 
 
 class FatalError(Exception):
@@ -350,8 +349,7 @@ def search_for(what: str, where: tuple, iso_name: str) -> str:
 	raise FatalError("{file} not found in {iso}".format(file=what, iso=iso_name))
 
 
-def get_network_parameters(iface: Union[str, None], ip: Union[str, None], nmask: Union[str, None])\
-		-> {Union[str, None], str, str}:
+def get_network_parameters(iface: Optional[str], ip: Optional[str], nmask: Optional[str]) -> {Optional[str], str, str}:
 	"""
 	Obtain at least an IP and a netmask from supplied parameters.
 
@@ -435,7 +433,7 @@ def copy_pxelinux_files() -> None:
 			raise FatalError(f"Cannot copy file: {str(why)}")
 
 
-def generate_dnsmasq_configuration(interface: Union[str, None], server: str) -> None:
+def generate_dnsmasq_configuration(interface: Optional[str], server: str) -> None:
 	"""
 	Generate, validate and save dnsmasq configuration
 
@@ -541,7 +539,7 @@ def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
 	return file_name, mount_directory
 
 
-def generate_iso_config(iso: list, keymaps: Union[None, tuple], mounted_files: list, server: str):
+def generate_iso_config(iso: list, keymaps: Optional[tuple], mounted_files: list, server: str):
 	syslinux_generated_config = ""
 
 	if len(iso) > 0:
@@ -561,7 +559,7 @@ def generate_iso_config(iso: list, keymaps: Union[None, tuple], mounted_files: l
 	os.chmod(GENERATEDISOCONF, os.stat(GENERATEDISOCONF).st_mode | stat.S_IROTH)
 
 
-def generate_isd_config(isd: list, keymaps: Union[None, tuple], mounted_files: list, server: str):
+def generate_isd_config(isd: list, keymaps: Optional[tuple], mounted_files: list, server: str):
 	syslinux_generated_config = ""
 
 	if len(isd) > 0:
