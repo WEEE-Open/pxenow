@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import glob
 import os
 import stat
 import urllib.request
@@ -218,16 +219,16 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 	"""
 
 	maybe_vmlinuz = (
-		f"{root_directory}/casper/vmlinuz",
-		f"{root_directory}/casper/vmlinuz.efi",  # TODO: glob this one too? Use regexes? What?
+		f"{root_directory}/casper/vmlinuz*",
+		# f"{root_directory}/casper/vmlinuz.efi",
 		f"{root_directory}/arch/boot/x86_64/vmlinuz"
-		f"{root_directory}/live/vmlinuz-*-amd64"  # TODO: globbing
+		f"{root_directory}/live/vmlinuz-*-amd64"
 	)
 	maybe_initrd = (
 		f"{root_directory}/casper/initrd.lz",
-		f"{root_directory}/casper/initrd",
+		# f"{root_directory}/casper/initrd",
 		f"{root_directory}/arch/boot/x86_64/archiso.img"
-		f"{root_directory}/live/initrd.img-*-amd64"  # TODO: globbing
+		f"{root_directory}/live/initrd.img-*-amd64"
 	)
 
 	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, name)
@@ -248,16 +249,32 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 		keymap=keymap
 	)
 
-	if os.path.isdir("{}/arch/boot/x86_64/".format(root_directory)):
-		print("{} seems to be Arch Linux x86_64".format(name))
+	if os.path.isdir(f"{root_directory}/arch/boot/x86_64/"):
+		print(f"{name} seems to be Arch Linux x86_64")
 		return syslinux_config_arch(ep)
+	elif os.path.isdir(f"{root_directory}/live/") and os.path.isdir(f"{root_directory}/d-i/"):
+		print(f"{name} seems to be Debian live")
+		return syslinux_config_debian(ep)
 	else:
-		print("{} seems to be Ubuntu (derivative) or unrecognized".format(name))
+		print(f"{name} seems to be Ubuntu (derivative) or unrecognized")
 		return syslinux_config_ubuntu(ep)
 
 
 def name_compact(name: str):
 	return re.sub(r'\W+', '', name)
+
+
+def syslinux_config_debian(ep: EntryParameters):
+	return str(f"""
+	LABEL {name_compact(ep.name)}
+	MENU LABEL {ep.name}
+	TEXT HELP
+		Boot Debian with kernel+initramfs from TFTP,
+		and root fs from NFS server {ep.server}
+	ENDTEXT
+	LINUX {ep.vmlinuz}
+	APPEND root=/dev/nfs netboot=nfs nfsroot={ep.server}:{ep.root_directory}/live/ initrd=::{ep.initrd}
+	""")
 
 
 # localized debian live:
@@ -286,51 +303,34 @@ def syslinux_config_ubuntu(ep: EntryParameters):
 		else:
 			keyboard_description = ", {} layout".format(k)
 			keyboard_param = " keyboard-configuration/layoutcode?=" + k
-		config += """
-	LABEL {label}{keymap}
-	MENU LABEL {name} (NFS{keyboard_description})
+		config += f"""
+	LABEL {label}{k}
+	MENU LABEL {ep.name} (NFS{keyboard_description})
 	TEXT HELP
 		Boot with kernel+initrd from TFTP,
-		and squashfs from NFS server {ip}
+		and squashfs from NFS server {ep.server}
 	ENDTEXT
-	KERNEL {vmlinuz}
-	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ip}:{mounted} initrd={initrd}{keyboard_param} ---
-		""".format(
-			label=label,
-			name=ep.name,
-			ip=ep.server,
-			vmlinuz=ep.vmlinuz,
-			initrd=ep.initrd,
-			mounted=ep.root_directory,
-			keyboard_param=keyboard_param,
-			keymap=k,
-			keyboard_description=keyboard_description
-		)
+	KERNEL {ep.vmlinuz}
+	APPEND root=/dev/nfs boot=casper netboot=nfs nfsroot={ep.server}:{ep.root_directory} initrd={ep.initrd}{keyboard_param} ---
+		"""
 
 	return config
 
 
 # TODO: doesn't work
 def syslinux_config_arch(ep: EntryParameters):
-	return """
-	LABEL {label}
-	MENU LABEL {name}
+	return str(f"""
+	LABEL {name_compact(ep.name)}
+	MENU LABEL {ep.name}
 	TEXT HELP
 		Boot Arch Linux with kernel+initramfs from TFTP,
-		and root fs from NFS server {ip}
+		and root fs from NFS server {ep.server}
 	ENDTEXT
-	LINUX {vmlinuz}
-	INITRD {initrd}
-	APPEND ip=:: archisobasedir=arch archiso_nfs_srv={ip}:{mounted}
+	LINUX {ep.vmlinuz}
+	INITRD {ep.initrd}
+	APPEND ip=:: archisobasedir=arch archiso_nfs_srv={ep.server}:{ep.root_directory}
 	SYSAPPEND 2
-	""".format(
-		label=name_compact(ep.name),
-		name=ep.name,
-		ip=ep.server,
-		vmlinuz=ep.vmlinuz,
-		initrd=ep.initrd,
-		mounted=ep.root_directory
-	)
+	""")
 
 
 def search_for(what: str, where: tuple, iso_name: str) -> str:
@@ -338,15 +338,18 @@ def search_for(what: str, where: tuple, iso_name: str) -> str:
 	Find first file that exists from a list of paths
 
 	:param what: File name/description (generic, human-readable)
-	:param where: Possible paths
+	:param where: Possible paths (to be globbed)
 	:param iso_name: ISO name or other printable name
 	:return:
 	"""
 	for maybe in where:
-		if os.path.isfile(maybe):
-			#  print("{file} found at {path}".format(file=what, path=maybe))
+		matches = glob.glob(maybe)
+		if len(matches) > 0:
+			maybe = matches[0]
+			if len(matches) > 1:
+				print(f"Warning: ambiguous globbing for {what}, choosing {maybe}")
 			return maybe
-	raise FatalError("{file} not found in {iso}".format(file=what, iso=iso_name))
+	raise FatalError(f"{what} not found in {iso_name}")
 
 
 def get_network_parameters(iface: Optional[str], ip: Optional[str], nmask: Optional[str]) -> {Optional[str], str, str}:
