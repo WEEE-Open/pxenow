@@ -217,18 +217,19 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 	:param keymap: Keymaps, for entries that support them
 	:return:
 	"""
-
+	
 	maybe_vmlinuz = (
 		f"{root_directory}/casper/vmlinuz*",
 		# f"{root_directory}/casper/vmlinuz.efi",
-		f"{root_directory}/arch/boot/x86_64/vmlinuz"
-		f"{root_directory}/live/vmlinuz-*-amd64"
+		f"{root_directory}/arch/boot/x86_64/vmlinuz",
+		f"{root_directory}/live/vmlinuz-*-amd64",
+		f"{root_directory}/live/vmlinuz*"
 	)
 	maybe_initrd = (
 		f"{root_directory}/casper/initrd.lz",
 		# f"{root_directory}/casper/initrd",
-		f"{root_directory}/arch/boot/x86_64/archiso.img"
-		f"{root_directory}/live/initrd.img-*-amd64"
+		f"{root_directory}/arch/boot/x86_64/archiso.img",
+		f"{root_directory}/live/initrd.img*"
 	)
 
 	vmlinuz_src = search_for("vmlinuz", maybe_vmlinuz, name)
@@ -273,7 +274,7 @@ def syslinux_config_debian(ep: EntryParameters):
 		and root fs from NFS server {ep.server}
 	ENDTEXT
 	LINUX {ep.vmlinuz}
-	APPEND root=/dev/nfs netboot=nfs nfsroot={ep.server}:{ep.root_directory}/live/ initrd=::{ep.initrd}
+	APPEND root=/dev/nfs netboot=nfs nfsroot={ep.server}:{ep.root_directory}/ initrd=::/boot/{ep.initrd} boot=live
 	""")
 
 
