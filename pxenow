@@ -217,13 +217,12 @@ def get_syslinux_config_for(name: str, root_directory: str, server: str, keymap:
 	:param keymap: Keymaps, for entries that support them
 	:return:
 	"""
-	
+
 	maybe_vmlinuz = (
 		f"{root_directory}/casper/vmlinuz*",
 		# f"{root_directory}/casper/vmlinuz.efi",
 		f"{root_directory}/arch/boot/x86_64/vmlinuz",
-		f"{root_directory}/live/vmlinuz-*-amd64",
-		f"{root_directory}/live/vmlinuz*"
+		f"{root_directory}/live/vmlinuz-*",
 	)
 	maybe_initrd = (
 		f"{root_directory}/casper/initrd.lz",
