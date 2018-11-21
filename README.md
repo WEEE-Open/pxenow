@@ -4,8 +4,8 @@ Start an impromptu PXE server immediately, here, now, right in current working d
 
 ## Features
 
-* Configures dnsmasq to DHCP in proxy mode: it should work even on networks with an existing DHCP server
-* Provides squashfs via NFS, not TFTP + memdisk: no need to fit the entire ISO in RAM
+* Configures dnsmasq to *DHCP in proxy mode*: it should work even on networks with an existing DHCP server
+* Provides *squashfs via NFS*, not TFTP + memdisk: no need to fit the entire ISO in RAM
 * ISO files are mounted/unmounted automatically and symlinks created when necessary
 * Syslinux/pxelinux boot menu with options to start Memtest86+, HDT, PLoP and netboot.xyz, in addition to user-specified ISOs
 * Downloads Memtest86+, PLoP and netboot.xyz executables automatically if not found
@@ -13,15 +13,15 @@ Start an impromptu PXE server immediately, here, now, right in current working d
 ## Limitations
 
 * Currently supports only BIOS systems, no UEFI
-* Syslinux config can be reliably generated only for *live* Ubuntu and derivatives, but should be easy to add
+* Syslinux config can be reliably generated only for *live* Debian, Ubuntu and derivatives, but should be easy to add
 more distros or the installer (see the `get_syslinux_config_for` function)
 * Many commands require root privileges. There's an option (`-S`) to call `sudo` automatically, but it hasn't been
 tested extensively
-* Tested only on Arch Linux, some commands may fail on other distros
+* Tested only on Arch Linux and Xubuntu as servers, some commands may fail on other distros
 
 ## Requirements
 
-- Python 3.6
+- Python 3.7
 - dnsmasq
 - NFS
 - syslinux and pxelinux (on Arch Linux both are located in the `syslinux` package)
