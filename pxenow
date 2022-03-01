@@ -537,7 +537,7 @@ def mount_iso(path_to_iso: str, mounted_files: list) -> {str, str}:
 	sudocall_result = sudocall(["mount", "-o", "loop,ro", "-t", "iso9660", path_to_iso, mount_directory])
 
 	if sudocall_result != 0:
-		raise FatalError("mount returned " + str(result), result)
+		raise FatalError("mount returned " + str(sudocall_result), sudocall_result)
 
 	return file_name, mount_directory
 
