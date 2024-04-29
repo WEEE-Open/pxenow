@@ -31,8 +31,8 @@ MENU COLOR timeout      1;30;47
 MENU COLOR tabmsg       1;30;47
 
 LABEL memtest
-	MENU LABEL Memtest86+ v5.01
-	KERNEL img/memtest
+	MENU LABEL Memtest86+ v7.00
+	KERNEL img/included/memtest
 
 LABEL hdt
 	MENU LABEL HDT (Hardware Detection Tool)

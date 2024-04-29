@@ -629,7 +629,7 @@ def main(mounted_files) -> int:
 
 	generate_dnsmasq_configuration(interface, server)
 
-	get_img_file("Memtest86+", "memtest", "http://www.memtest.org/download/5.01/memtest86+-5.01.zip", "memtest86+-5.01.bin")
+	get_img_file("Memtest86+", "memtest", "https://www.memtest.org/download/v7.00/mt86plus_7.00.binaries.zip", "memtest32.bin")
 	get_img_file("PLoP", "plpbt.bin", "https://download.plop.at/files/bootmngr/plpbt-5.0.15.zip", "plpbt-5.0.15/plpbt.bin")
 	get_img_file("netboot.xyz", "netbootxyz", "https://boot.netboot.xyz/ipxe/netboot.xyz.lkrn", "")
 
